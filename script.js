@@ -9,15 +9,16 @@ import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.7.0/firebase
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-apiKey: "AIzaSyADWlsL5G6-f6dblwT5rHGuetF9u15PkvA",
-authDomain: "test-tictactoe-96be2.firebaseapp.com",
-databaseURL: "https://test-tictactoe-96be2-default-rtdb.firebaseio.com",
-projectId: "test-tictactoe-96be2",
-storageBucket: "test-tictactoe-96be2.firebasestorage.app",
-messagingSenderId: "1013893533392",
-appId: "1:1013893533392:web:e7ba0695435c7b4ead18d5",
-measurementId: "G-P1KQ4V04XH"
+    apiKey: "AIzaSyADWlsL5G6-f6dblwT5rHGuetF9u15PkvA",
+    authDomain: "test-tictactoe-96be2.firebaseapp.com",
+    databaseURL: "https://test-tictactoe-96be2-default-rtdb.firebaseio.com",
+    projectId: "test-tictactoe-96be2",
+    storageBucket: "test-tictactoe-96be2.firebasestorage.app",
+    messagingSenderId: "1013893533392",
+    appId: "1:1013893533392:web:e7ba0695435c7b4ead18d5",
+    measurementId: "G-P1KQ4V04XH"
 };
+
 
 // Initialize Firebase
 let db;
@@ -35,8 +36,14 @@ let currentGameId = '';
 let playerSymbol = '';
 let gameRef = null;
 
-// Initialize
-loadAvailableGames();
+// Wait for DOM to load
+document.addEventListener('DOMContentLoaded', function() {
+    loadAvailableGames();
+    
+    // Add event listeners
+    document.getElementById('startBtn').addEventListener('click', startGame);
+    document.getElementById('newGameBtn').addEventListener('click', newGame);
+});
 
 function startGame() {
     const name = document.getElementById('playerName').value.trim();
@@ -166,7 +173,7 @@ function renderBoard(game) {
             cell.classList.add(game.board[i].toLowerCase());
         }
         
-        cell.onclick = () => makeMove(i);
+        cell.addEventListener('click', () => makeMove(i));
         boardDiv.appendChild(cell);
     }
 }
@@ -227,9 +234,9 @@ function loadAvailableGames() {
             if (!game.player2 || Date.now() - game.createdAt < 3600000) {
                 const gameItem = document.createElement('div');
                 gameItem.className = 'game-item';
-                gameItem.onclick = () => {
+                gameItem.addEventListener('click', () => {
                     document.getElementById('gameId').value = key;
-                };
+                });
                 
                 const status = game.player2 ? 'In Progress' : 'Waiting for player';
                 gameItem.innerHTML = `
@@ -242,4 +249,5 @@ function loadAvailableGames() {
     }).catch((error) => {
         console.error('Error loading games:', error);
     });
+
 }

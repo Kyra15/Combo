@@ -1,8 +1,4 @@
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
 // Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
     apiKey: "AIzaSyADWlsL5G6-f6dblwT5rHGuetF9u15PkvA",
     authDomain: "test-tictactoe-96be2.firebaseapp.com",
@@ -13,7 +9,6 @@ const firebaseConfig = {
     appId: "1:1013893533392:web:e7ba0695435c7b4ead18d5",
     measurementId: "G-P1KQ4V04XH"
 };
-
 
 // Initialize Firebase
 let db;
@@ -36,8 +31,16 @@ document.addEventListener('DOMContentLoaded', function() {
     loadAvailableGames();
     
     // Add event listeners
-    document.getElementById('startBtn').addEventListener('click', startGame);
-    document.getElementById('newGameBtn').addEventListener('click', newGame);
+    const startBtn = document.getElementById('startBtn');
+    const newGameBtn = document.getElementById('newGameBtn');
+    
+    if (startBtn) {
+        startBtn.addEventListener('click', startGame);
+    }
+    
+    if (newGameBtn) {
+        newGameBtn.addEventListener('click', newGame);
+    }
 });
 
 function startGame() {
@@ -244,5 +247,4 @@ function loadAvailableGames() {
     }).catch((error) => {
         console.error('Error loading games:', error);
     });
-
 }

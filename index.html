@@ -1,46 +1,62 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Multiplayer Tic-Tac-Toe</title>
-        <link rel="stylesheet" href="styles.css">
-        <script src="script.js" defer></script>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🎮 Tic-Tac-Toe</h1>
-            <p class="subtitle">Multiplayer across the web</p>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Tic-Tac-Toe</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🎮 Tic-Tac-Toe</h1>
+        <p class="subtitle">Multiplayer across the web</p>
 
-            <div id="setupScreen" class="setup">
-                <div class="input-group">
-                    <label for="playerName">Your Name</label>
-                    <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
-                </div>
-                <div class="input-group">
-                    <label for="gameId">Game ID (optional - leave empty to create new)</label>
-                    <input type="text" id="gameId" placeholder="Enter game ID to join existing game" maxlength="30">
-                </div>
-                <button onclick="startGame()">Start Game</button>
-                <div id="error" class="error"></div>
-                
-                <div class="games-list" id="gamesList"></div>
+        <div id="setupScreen" class="setup">
+            <div class="config-notice">
+                <h3>⚙️ Firebase Setup Required</h3>
+                <p>To enable multiplayer, configure Firebase in script.js:</p>
+                <ol>
+                    <li>Go to <a href="https://console.firebase.google.com" target="_blank">Firebase Console</a></li>
+                    <li>Create a new project</li>
+                    <li>Enable Realtime Database</li>
+                    <li>Copy your config to script.js</li>
+                </ol>
             </div>
 
-            <div id="gameScreen" class="hidden">
-                <div class="game-info">
-                    <h3 id="gameIdDisplay"></h3>
-                    <p>Share this ID with your opponent!</p>
-                    <div class="status" id="status"></div>
-                </div>
+            <div class="input-group">
+                <label for="playerName">Your Name</label>
+                <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+            </div>
+            <div class="input-group">
+                <label for="gameId">Game ID (optional - leave empty to create new)</label>
+                <input type="text" id="gameId" placeholder="Enter game ID to join existing game" maxlength="30">
+            </div>
+            <button onclick="startGame()">Start Game</button>
+            <div id="error" class="error"></div>
+            
+            <div class="games-list" id="gamesList"></div>
+        </div>
 
-                <div class="board" id="board"></div>
+        <div id="gameScreen" class="hidden">
+            <div class="game-info">
+                <h3 id="gameIdDisplay"></h3>
+                <p>Share this ID with your opponent!</p>
+                <div class="status" id="status"></div>
+            </div>
 
-                <div class="controls">
-                    <button onclick="refreshGame()">Refresh</button>
-                    <button onclick="resetGame()">New Game</button>
-                </div>
+            <div class="board" id="board"></div>
+
+            <div class="controls">
+                <button onclick="newGame()">New Game</button>
             </div>
         </div>
-    </body>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    
+    <!-- Your script -->
+    <script src="script.js"></script>
+</body>
 </html>

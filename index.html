@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Card Table — Multiplayer</title>
+    <title>Combo!</title>
     <link rel="stylesheet" href="styles.css">
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Jua&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 </head>
 <body>
 
@@ -18,36 +18,38 @@
         <!-- Left: name + create/join -->
         <div class="lobby-left">
             <div class="logo">
-                <span class="logo-suit">♠</span>
-                <h1>Card Table</h1>
-                <span class="logo-suit red">♥</span>
+                <!-- <span class="logo-suit">♠</span> -->
+                <h1>Combo!</h1>
+                <!-- <span class="logo-suit red">♥</span> -->
+                <br>
             </div>
-            <p class="tagline">Multiplayer · Up to 8 Players</p>
+            <!-- <p class="tagline">Multiplayer · Up to 8 Players</p> -->
 
             <div class="field-group">
+                <br>
                 <label>Your Name</label>
-                <input type="text" id="playerName" placeholder="e.g. Lady Luck" maxlength="20" autocomplete="off">
+                <input type="text" id="playerName" maxlength="20" autocomplete="off">
             </div>
 
-            <button id="createBtn" class="btn-primary">✦ Create New Table</button>
+            <button id="createBtn" class="btn-primary">✦ Create New Game</button>
 
             <div class="or-divider"><span>or join with ID</span></div>
 
             <div class="join-row">
-                <input type="text" id="gameId" placeholder="Paste a Table ID…" maxlength="40" autocomplete="off">
+                <input type="text" id="gameId" placeholder="Paste a game ID (4 digits)…" maxlength="40" autocomplete="off">
                 <button id="joinBtn" class="btn-join">Join</button>
             </div>
 
             <div id="error" class="error-msg"></div>
         </div>
 
-        <!-- Right: open tables list -->
+        <!-- Right: open games list -->
         <div class="lobby-right">
-            <div class="tables-header">
-                <span>Open Tables</span>
+            <div class="games-header">
+                <span>Open Games</span>
                 <button class="btn-refresh" id="refreshBtn">↺</button>
             </div>
-            <div id="gamesList" class="table-list"></div>
+            <div id="gamesList" class="game-list"></div>
         </div>
 
     </div>
@@ -58,9 +60,9 @@
     <div class="felt-texture"></div>
 
     <header class="top-bar">
-        <div class="table-id-display" id="tableIdDisplay"></div>
+        <div class="game-id-display" id="gameIdDisplay"></div>
         <div class="turn-badge" id="turnBadge">Waiting…</div>
-        <button class="btn-leave" id="leaveBtn">Leave Table</button>
+        <button class="btn-leave" id="leaveBtn">Leave Game</button>
     </header>
 
     <div class="players-ring" id="playersRing"></div>
@@ -81,11 +83,11 @@
             <button class="btn-action btn-pass" id="passBtn">Pass Turn</button>
         </div>
     </div>
-
+<!-- 
     <div class="log-panel">
         <div class="log-title">Game Log</div>
         <div class="log-entries" id="logEntries"></div>
-    </div>
+    </div> -->
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>

@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════
-//  CARD TABLE — Multiplayer Card Game
+//  CARD game — Multiplayer Card Game
 // ══════════════════════════════════════════════════
 
 const firebaseConfig = {
@@ -27,6 +27,7 @@ let currentGameId = '';
 let gameRef = null;
 let isMyTurn = false;
 let playerOrder = [];
+let presenceRef = null;
 
 // ── Constants ──────────────────────────────────────
 const SUITS = ['♠', '♥', '♦', '♣'];
@@ -66,8 +67,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('createBtn').addEventListener('click', handleCreate);
     document.getElementById('joinBtn').addEventListener('click', handleJoin);
-    document.getElementById('refreshBtn').addEventListener('click', loadTables);
-    document.getElementById('leaveBtn').addEventListener('click', leaveTable);
+    document.getElementById('refreshBtn').addEventListener('click', loadgames);
+    document.getElementById('leaveBtn').addEventListener('click', leavegame);
     document.getElementById('drawBtn').addEventListener('click', drawCard);
     document.getElementById('passBtn').addEventListener('click', passTurn);
 
@@ -78,16 +79,44 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') handleJoin();
     });
 
-    loadTables();
+    // Remove player on tab close / refresh using sendBeacon (best-effort sync)
+    window.addEventListener('beforeunload', () => {
+        if (!currentGameId || !myId) return;
+        const url = `https://combo-7d1b6-default-rtdb.firebaseio.com/card_games/${currentGameId}/players/${myId}.json`;
+        // sendBeacon with DELETE isn't natively supported, so use a small fetch keepalive
+        fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {});
+    });
+
+    loadgames();
 });
+
+// ── Register Firebase onDisconnect (handles crashes/network drops) ──
+async function registerPresence() {
+    if (!db || !currentGameId) return;
+    presenceRef = db.ref(`card_games/${currentGameId}/players/${myId}`);
+    // Firebase server will remove this node if connection drops
+    await presenceRef.onDisconnect().remove();
+}
+
+// ── Delete the game if no players remain ──────────
+async function cleanupIfEmpty() {
+    if (!currentGameId) return;
+    try {
+        const ref = db.ref(`card_games/${currentGameId}/players`);
+        const snap = await ref.once('value');
+        if (!snap.exists() || Object.keys(snap.val() || {}).length === 0) {
+            await db.ref(`card_games/${currentGameId}`).remove();
+        }
+    } catch(e) {}
+}
 
 // ══════════════════════════════════════════════════
 //  LOBBY
 // ══════════════════════════════════════════════════
-function loadTables() {
+function loadgames() {
     if (!db) return;
     const list = document.getElementById('gamesList');
-    list.innerHTML = '<div class="no-tables">Looking for open tables…</div>';
+    list.innerHTML = '<div class="no-games">Looking for open games…</div>';
 
     db.ref('card_games').limitToLast(20).once('value').then(snap => {
         list.innerHTML = '';
@@ -102,27 +131,27 @@ function loadTables() {
         });
 
         if (items.length === 0) {
-            list.innerHTML = '<div class="no-tables">No open tables — create one!</div>';
+            list.innerHTML = '<div class="no-games">No open games</div>';
             return;
         }
 
         items.reverse().forEach(({ key, game, count }) => {
             const div = document.createElement('div');
-            div.className = 'table-item';
+            div.className = 'game-item';
             div.innerHTML = `
-                <div class="table-item-info">
-                    <div class="table-item-name">🃏 ${key.replace('table_', 'Table ')}</div>
-                    <div class="table-item-meta">Host: ${game.host} · ${count}/${MAX_PLAYERS} players</div>
+                <div class="game-item-info">
+                    <div class="game-item-name">${key.replace('game_', 'Game ')}</div>
+                    <div class="game-item-meta">Host: ${game.host} · ${count}/${MAX_PLAYERS} players</div>
                 </div>
-                <div class="table-item-join">Join →</div>
+                <div class="game-item-join">Join →</div>
             `;
             div.addEventListener('click', () => {
-                document.getElementById('gameId').value = key;
+                document.getElementById('gameId').value = key.replace("game_", "");
                 handleJoin();
             });
             list.appendChild(div);
         });
-    }).catch(err => showError('Could not load tables: ' + err.message));
+    }).catch(err => showError('Could not load games: ' + err.message));
 }
 
 function getName() {
@@ -135,23 +164,23 @@ async function handleCreate() {
     const name = getName();
     if (!name) return;
     myName = name;
-    await enterGame('table_' + Date.now(), true);
+    await enterGame('game_' + Math.floor(1000 + Math.random() * 9000), true);
 }
 
 async function handleJoin() {
     const name = getName();
     if (!name) return;
-    const tableId = document.getElementById('gameId').value.trim();
-    if (!tableId) { showError('Paste a Table ID to join, or create a new table'); return; }
+    const gameId = "game_" + document.getElementById('gameId').value.trim();
+    if (!gameId || gameId.toString().length != 4) { showError('Paste a game ID to join or create a new game'); return; }
     myName = name;
-    await enterGame(tableId, false);
+    await enterGame(gameId, false);
 }
 
 // ── Core join/create logic ─────────────────────────
-async function enterGame(tableId, isNew) {
+async function enterGame(gameId, isNew) {
     if (!db) { showError('Firebase not connected'); return; }
 
-    currentGameId = tableId;
+    currentGameId = gameId;
     gameRef = db.ref('card_games/' + currentGameId);
 
     try {
@@ -159,7 +188,6 @@ async function enterGame(tableId, isNew) {
         const game = snap.val();
 
         if (isNew || !game) {
-            // Create fresh table
             const deck = buildDeck();
             await gameRef.set({
                 host: myName,
@@ -181,15 +209,14 @@ async function enterGame(tableId, isNew) {
                 }
             });
         } else {
-            // Join existing table
             const players = game.players || {};
             const playerCount = Object.keys(players).length;
             const existing = Object.values(players).find(p => p.name === myName);
 
             if (existing) {
-                myId = existing.id; // reconnect
+                myId = existing.id;
             } else {
-                if (playerCount >= MAX_PLAYERS) { showError('Table is full'); return; }
+                if (playerCount >= MAX_PLAYERS) { showError('game is full'); return; }
             }
 
             const currentOrder = game.playerOrder || [];
@@ -206,6 +233,9 @@ async function enterGame(tableId, isNew) {
             }
             await gameRef.update(updates);
         }
+
+        // Register server-side onDisconnect cleanup
+        await registerPresence();
 
         showGameScreen();
         listenToGame();
@@ -224,7 +254,7 @@ function showGameScreen() {
     document.getElementById('lobbyScreen').classList.add('hidden');
     document.getElementById('gameScreen').classList.remove('hidden');
     document.getElementById('gameScreen').classList.add('active');
-    document.getElementById('tableIdDisplay').textContent = `Table ID: ${currentGameId}`;
+    document.getElementById('gameIdDisplay').textContent = `game ID: ${currentGameId.replace("game_", "")}`;
 }
 
 function showLobbyScreen() {
@@ -237,7 +267,17 @@ function showLobbyScreen() {
 function listenToGame() {
     gameRef.on('value', snap => {
         const game = snap.val();
-        if (game) renderGame(game);
+        // Game was deleted — all players left
+        if (!game) {
+            gameRef.off();
+            gameRef = null;
+            currentGameId = '';
+            presenceRef = null;
+            showLobbyScreen();
+            loadgames();
+            return;
+        }
+        renderGame(game);
     });
 }
 
@@ -359,6 +399,7 @@ function renderTurnBadge(players, currentTurnId) {
 
 function renderLog(log) {
     const el = document.getElementById('logEntries');
+    if (!el) return;
     el.innerHTML = '';
     log.slice(-20).reverse().forEach(entry => {
         const div = document.createElement('div');
@@ -431,18 +472,36 @@ async function passTurn() {
     await gameRef.update({ turnIndex: next, log });
 }
 
-async function leaveTable() {
-    if (gameRef) {
-        try { await gameRef.child('players/' + myId).remove(); } catch(e) {}
+// ── Leave game (button) ────────────────────────────
+async function leavegame() {
+    if (!gameRef || !currentGameId) return;
+
+    try {
+        // Cancel the onDisconnect since we're leaving intentionally
+        if (presenceRef) await presenceRef.onDisconnect().cancel();
+
+        // Stop listening first
         gameRef.off();
-        gameRef = null;
+
+        // Remove this player
+        await db.ref(`card_games/${currentGameId}/players/${myId}`).remove();
+
+        // Delete the game if no players remain
+        await cleanupIfEmpty();
+    } catch(e) {
+        console.error('leavegame error:', e);
     }
+
+    // Reset and go back to lobby
+    gameRef = null;
+    presenceRef = null;
     currentGameId = '';
     isMyTurn = false;
     playerOrder = [];
     document.getElementById('gameId').value = '';
+
     showLobbyScreen();
-    loadTables();
+    loadgames();
 }
 
 function showError(msg) {

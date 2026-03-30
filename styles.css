@@ -26,7 +26,7 @@ body {
     min-height: 100vh;
 }
 
-.screen { position: relative; min-height: 100vh; }
+.screen { position: relative; min-height: 100vh; height: 100%;}
 .screen.hidden { display: none !important; }
 .screen.active { display: block; }
 
@@ -38,9 +38,9 @@ body {
     min-height: 100vh;
     display: flex;
     align-items: stretch;
+    height: 100vh; 
 }
 
-/* Wavy SVG divider between panels */
 .lobby-layout {
     display: flex;
     width: 100%;
@@ -59,26 +59,6 @@ body {
     position: relative;
     overflow: hidden;
 }
-
-/* Decorative circles */
-/* .lobby-left::before {
-    content: '';
-    position: absolute;
-    width: 260px; height: 260px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.08);
-    top: -80px; right: -80px;
-    pointer-events: none;
-}
-.lobby-left::after {
-    content: '';
-    position: absolute;
-    width: 180px; height: 180px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.06);
-    bottom: 40px; left: -60px;
-    pointer-events: none;
-} */
 
 .logo {
     display: flex;
@@ -357,7 +337,8 @@ body {
     display: flex;
     flex-direction: column;
     min-height: 100vh;
-    padding-bottom: 24px;
+    /* padding-bottom: 24px; */
+    height: 100vh;
 }
 
 /* Top bar */
@@ -518,7 +499,7 @@ body {
 
 /* Hand */
 .hand-zone {
-    padding: 18px 20px;
+    padding: 18px 20px 32px;
     background: var(--white);
     border-top: 3px solid var(--tan-dark);
     border-radius: 20px 20px 0 0;
@@ -540,6 +521,7 @@ body {
     gap: 8px;
     min-height: var(--card-h);
     align-items: center;
+    justify-content: center;
     margin-bottom: 14px;
 }
 
@@ -604,7 +586,7 @@ body {
 .playing-card.disabled { cursor: not-allowed; opacity: 0.65; }
 .playing-card.pile-card { position: absolute; top: 0; left: 0; cursor: default; }
 
-.card-corner { display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
+.card-corner { display: flex; flex-direction: column; align-items: left; line-height: 1.1; }
 .card-corner.bottom { align-self: flex-end; transform: rotate(180deg); }
 .card-rank { font-family: 'Jua', cursive; font-size: 1.05rem; line-height: 1; }
 .card-suit-small { font-size: 0.72rem; line-height: 1; }

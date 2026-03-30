@@ -11,7 +11,6 @@
 
 <!-- ══════════ LOBBY ══════════ -->
 <div id="lobbyScreen" class="screen active">
-    <div class="felt-texture"></div>
 
     <div class="lobby-layout">
 
@@ -57,7 +56,6 @@
 
 <!-- ══════════ GAME ══════════ -->
 <div id="gameScreen" class="screen hidden">
-    <div class="felt-texture"></div>
 
     <header class="top-bar">
         <div class="game-id-display" id="gameIdDisplay"></div>
@@ -68,26 +66,18 @@
     <div class="players-ring" id="playersRing"></div>
 
     <div class="center-zone">
-        <div class="pile-label">Center Pile</div>
         <div class="pile-stack" id="pileStack">
             <div class="pile-empty">No cards yet</div>
         </div>
-        <div class="pile-count" id="pileCount"></div>
     </div>
 
     <div class="hand-zone">
-        <div class="hand-label" id="handLabel">Your Hand</div>
         <div class="hand-cards" id="handCards"></div>
         <div class="hand-actions">
             <button class="btn-action" id="drawBtn">Draw Card</button>
             <button class="btn-action btn-pass" id="passBtn">Pass Turn</button>
         </div>
     </div>
-<!-- 
-    <div class="log-panel">
-        <div class="log-title">Game Log</div>
-        <div class="log-entries" id="logEntries"></div>
-    </div> -->
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>

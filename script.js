@@ -237,6 +237,7 @@ async function enterGame(gameId, isNew) {
         // Register server-side onDisconnect cleanup
         await registerPresence();
 
+        dealCards();
         showGameScreen();
         listenToGame();
 
@@ -325,12 +326,10 @@ function renderPlayers(players, currentTurnId) {
 
 function renderPile(pile) {
     const stack = document.getElementById('pileStack');
-    const countEl = document.getElementById('pileCount');
     stack.innerHTML = '';
 
     if (pile.length === 0) {
         stack.innerHTML = '<div class="pile-empty">No cards yet</div>';
-        countEl.textContent = '';
         return;
     }
 
@@ -346,18 +345,11 @@ function renderPile(pile) {
         stack.appendChild(el);
     });
 
-    countEl.textContent = `${pile.length} card${pile.length !== 1 ? 's' : ''}`;
 }
 
 function renderHand(hand) {
     const container = document.getElementById('handCards');
-    document.getElementById('handLabel').textContent = `Your Hand (${hand.length} cards)`;
     container.innerHTML = '';
-
-    if (hand.length === 0) {
-        container.innerHTML = '<span style="color:rgba(255,255,255,0.2);font-size:0.85rem;font-style:italic">No cards — draw one!</span>';
-        return;
-    }
 
     hand.forEach((card, idx) => {
         const el = buildCard(card, !isMyTurn);
@@ -415,12 +407,38 @@ function updateButtons(game) {
     const passBtn = document.getElementById('passBtn');
     drawBtn.disabled = !isMyTurn || deck.length === 0;
     passBtn.disabled = !isMyTurn;
-    drawBtn.textContent = deck.length > 0 ? `Draw Card (${deck.length} left)` : 'Deck Empty';
+    // drawBtn.textContent = deck.length > 0 ? `Draw Card (${deck.length} left)` : 'Deck Empty';
 }
 
 // ══════════════════════════════════════════════════
 //  ACTIONS
 // ══════════════════════════════════════════════════
+
+async function dealCards() {
+    // draw 4 random cards per player
+    // update database 
+    const snap = await gameRef.once('value');
+    const game = snap.val();
+    if (!game) return;
+
+    let deck = [...game.deck];
+    const players = game.players;
+    let updates = {};
+
+    for (const playerID in players) {
+        const hand = [];
+        for (let i=0; i < 4; i++) {
+            const card = deck.pop();
+            hand.push(card)
+        }
+        updates[`players/${playerID}/hand`] = hand
+    }
+    updates['deck'] = deck;
+
+    await gameRef.update(updates)
+}
+
+
 async function playCard(idx) {
     if (!isMyTurn) return;
     const snap = await gameRef.once('value');
@@ -471,6 +489,7 @@ async function passTurn() {
         `<span class="log-name">${me ? me.name : 'Someone'}</span> passed`];
     await gameRef.update({ turnIndex: next, log });
 }
+
 
 // ── Leave game (button) ────────────────────────────
 async function leavegame() {

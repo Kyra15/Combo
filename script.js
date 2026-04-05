@@ -1,7 +1,3 @@
-// ══════════════════════════════════════════════════
-//  CARD game — Multiplayer Card Game
-// ══════════════════════════════════════════════════
-
 const firebaseConfig = {
     apiKey: "AIzaSyBzl5u8OZoBkE5l0qdgzlHHTP0W66ulJYQ",
     authDomain: "combo-7d1b6.firebaseapp.com",
@@ -20,7 +16,7 @@ try {
     console.error('Firebase init error:', e);
 }
 
-// ── State ──────────────────────────────────────────
+// init stuff
 let myName = '';
 let myId = '';
 let currentGameId = '';
@@ -29,7 +25,6 @@ let isMyTurn = false;
 let playerOrder = [];
 let presenceRef = null;
 
-// ── Constants ──────────────────────────────────────
 const SUITS = ['♠', '♥', '♦', '♣'];
 const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 const MAX_PLAYERS = 8;
@@ -38,7 +33,7 @@ function genId() {
     return 'p_' + Math.random().toString(36).substr(2, 9);
 }
 
-// ── Deck ───────────────────────────────────────────
+// building deck
 function buildDeck() {
     const deck = [];
     for (const suit of SUITS)
@@ -59,9 +54,7 @@ function shuffle(arr) {
 function cardLabel(c) { return `${c.rank}${c.suit}`; }
 function isRed(c) { return c.suit === '♥' || c.suit === '♦'; }
 
-// ══════════════════════════════════════════════════
-//  BOOT
-// ══════════════════════════════════════════════════
+// on start
 document.addEventListener('DOMContentLoaded', () => {
     myId = genId();
 
@@ -70,7 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('refreshBtn').addEventListener('click', loadgames);
     document.getElementById('leaveBtn').addEventListener('click', leavegame);
     document.getElementById('drawBtn').addEventListener('click', drawCard);
-    document.getElementById('passBtn').addEventListener('click', passTurn);
+    document.getElementById('comboBtn').addEventListener('click', comboFunc);
 
     document.getElementById('playerName').addEventListener('keydown', e => {
         if (e.key === 'Enter') handleCreate();
@@ -79,26 +72,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') handleJoin();
     });
 
-    // Remove player on tab close / refresh using sendBeacon (best-effort sync)
+    // buncha weird stuff
     window.addEventListener('beforeunload', () => {
         if (!currentGameId || !myId) return;
         const url = `https://combo-7d1b6-default-rtdb.firebaseio.com/card_games/${currentGameId}/players/${myId}.json`;
-        // sendBeacon with DELETE isn't natively supported, so use a small fetch keepalive
         fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {});
     });
 
     loadgames();
 });
 
-// ── Register Firebase onDisconnect (handles crashes/network drops) ──
 async function registerPresence() {
     if (!db || !currentGameId) return;
     presenceRef = db.ref(`card_games/${currentGameId}/players/${myId}`);
-    // Firebase server will remove this node if connection drops
     await presenceRef.onDisconnect().remove();
 }
 
-// ── Delete the game if no players remain ──────────
 async function cleanupIfEmpty() {
     if (!currentGameId) return;
     try {
@@ -110,9 +99,8 @@ async function cleanupIfEmpty() {
     } catch(e) {}
 }
 
-// ══════════════════════════════════════════════════
-//  LOBBY
-// ══════════════════════════════════════════════════
+// lobby
+
 function loadgames() {
     if (!db) return;
     const list = document.getElementById('gamesList');
@@ -126,6 +114,7 @@ function loadgames() {
             if (!g || !g.players) return;
             const count = Object.keys(g.players).length;
             if (count < MAX_PLAYERS && g.status === 'waiting') {
+                console.log("waiting game")
                 items.push({ key: child.key, game: g, count });
             }
         });
@@ -170,13 +159,14 @@ async function handleCreate() {
 async function handleJoin() {
     const name = getName();
     if (!name) return;
-    const gameId = "game_" + document.getElementById('gameId').value.trim();
+    let gameId = document.getElementById('gameId').value.trim();
+    console.log("handleJoin game id " + gameId);
     if (!gameId || gameId.toString().length != 4) { showError('Paste a game ID to join or create a new game'); return; }
     myName = name;
+    gameId = "game_" + gameId;
     await enterGame(gameId, false);
 }
 
-// ── Core join/create logic ─────────────────────────
 async function enterGame(gameId, isNew) {
     if (!db) { showError('Firebase not connected'); return; }
 
@@ -197,12 +187,11 @@ async function enterGame(gameId, isNew) {
                 pile: [],
                 turnIndex: 0,
                 playerOrder: [myId],
-                log: [],
                 players: {
                     [myId]: {
                         id: myId,
                         name: myName,
-                        hand: [],
+                        hand: {},
                         colorIndex: 0,
                         joinedAt: Date.now()
                     }
@@ -224,7 +213,7 @@ async function enterGame(gameId, isNew) {
             updates[`players/${myId}`] = {
                 id: myId,
                 name: myName,
-                hand: existing ? existing.hand : [],
+                hand: existing ? existing.hand : {},
                 colorIndex: playerCount % MAX_PLAYERS,
                 joinedAt: Date.now()
             };
@@ -234,7 +223,6 @@ async function enterGame(gameId, isNew) {
             await gameRef.update(updates);
         }
 
-        // Register server-side onDisconnect cleanup
         await registerPresence();
 
         dealCards();
@@ -247,9 +235,8 @@ async function enterGame(gameId, isNew) {
     }
 }
 
-// ══════════════════════════════════════════════════
-//  GAME SCREEN
-// ══════════════════════════════════════════════════
+// actual game screen
+
 function showGameScreen() {
     document.getElementById('lobbyScreen').classList.remove('active');
     document.getElementById('lobbyScreen').classList.add('hidden');
@@ -268,7 +255,7 @@ function showLobbyScreen() {
 function listenToGame() {
     gameRef.on('value', snap => {
         const game = snap.val();
-        // Game was deleted — all players left
+        // delete game if all players leave
         if (!game) {
             gameRef.off();
             gameRef = null;
@@ -298,7 +285,6 @@ function renderGame(game) {
     renderPile(game.pile || []);
     renderHand(myHand);
     renderTurnBadge(players, currentTurnId);
-    renderLog(game.log || []);
     updateButtons(game);
 }
 
@@ -312,7 +298,7 @@ function renderPlayers(players, currentTurnId) {
             chip.className = 'player-chip'
                 + (p.id === currentTurnId ? ' active-turn' : '')
                 + (p.id === myId ? ' is-me' : '');
-            const count = (p.hand || []).length;
+            const count = Object.keys(p.hand || {}).filter(k => p.hand[k]).length;
             chip.innerHTML = `
                 <div class="player-avatar color-${p.colorIndex || 0}">${p.name[0].toUpperCase()}</div>
                 <div>
@@ -334,7 +320,7 @@ function renderPile(pile) {
     }
 
     pile.slice(-3).forEach((card, i, arr) => {
-        const el = buildCard(card, false);
+        const el = buildCard(card, false, false);
         el.classList.add('pile-card');
         el.style.top = `${i * -3}px`;
         el.style.left = `${i * 2}px`;
@@ -348,20 +334,37 @@ function renderPile(pile) {
 }
 
 function renderHand(hand) {
+    console.log('renderHand:', hand);
     const container = document.getElementById('handCards');
     container.innerHTML = '';
 
-    hand.forEach((card, idx) => {
-        const el = buildCard(card, !isMyTurn);
-        el.addEventListener('click', () => { if (isMyTurn) playCard(idx); });
-        container.appendChild(el);
-    });
+    const filledKeys = Object.keys(hand).filter(k => hand[k]).map(Number);
+    const numSlots = Math.max(...filledKeys) < 4 ? 4 : Math.max(...filledKeys) + 1;
+
+    for (let i = 0; i < numSlots; i++) {
+        const slot = document.createElement('div');
+        slot.className = 'card-slot';
+
+        const card = hand[i] || null;
+        if (card) {
+            const el = buildCard(card, false, true);
+            el.addEventListener('click', () => { if (isMyTurn) playCard(i); });
+            slot.appendChild(el);
+        }
+
+        container.appendChild(slot);
+    }
 }
 
-function buildCard(card, disabled) {
+function buildCard(card, disabled, faceDown) {
     const el = document.createElement('div');
-    el.className = 'playing-card' + (disabled ? ' disabled' : '');
+    el.className = 'playing-card' + (disabled ? ' disabled' : '') + (faceDown ? ' face-down' : '');
+    el.dataset.rank = card.rank;
+    el.dataset.suit = card.suit;
+    el.dataset.isRed = isRed(card);
+
     const c = isRed(card) ? 'red' : 'black';
+
     el.innerHTML = `
         <div class="card-corner">
             <div class="card-rank ${c}">${card.rank}</div>
@@ -371,6 +374,9 @@ function buildCard(card, disabled) {
         <div class="card-corner bottom">
             <div class="card-rank ${c}">${card.rank}</div>
             <div class="card-suit-small ${c}">${card.suit}</div>
+        </div>
+        <div class="card-back">
+            <div class="card-back-pattern"></div>
         </div>
     `;
     return el;
@@ -389,30 +395,16 @@ function renderTurnBadge(players, currentTurnId) {
     }
 }
 
-function renderLog(log) {
-    const el = document.getElementById('logEntries');
-    if (!el) return;
-    el.innerHTML = '';
-    log.slice(-20).reverse().forEach(entry => {
-        const div = document.createElement('div');
-        div.className = 'log-entry';
-        div.innerHTML = entry;
-        el.appendChild(div);
-    });
-}
-
 function updateButtons(game) {
     const deck = game.deck || [];
     const drawBtn = document.getElementById('drawBtn');
-    const passBtn = document.getElementById('passBtn');
+    const comboBtn = document.getElementById('comboBtn');
     drawBtn.disabled = !isMyTurn || deck.length === 0;
-    passBtn.disabled = !isMyTurn;
+    comboBtn.disabled = !isMyTurn;
     // drawBtn.textContent = deck.length > 0 ? `Draw Card (${deck.length} left)` : 'Deck Empty';
 }
 
-// ══════════════════════════════════════════════════
-//  ACTIONS
-// ══════════════════════════════════════════════════
+// actions
 
 async function dealCards() {
     // draw 4 random cards per player
@@ -426,12 +418,13 @@ async function dealCards() {
     let updates = {};
 
     for (const playerID in players) {
-        const hand = [];
+        const existingHand = players[playerID].hand || {};
+        if (Object.keys(existingHand).length > 0) continue;
+        const hand = {};
         for (let i=0; i < 4; i++) {
-            const card = deck.pop();
-            hand.push(card)
+            hand[i] = deck.pop()
         }
-        updates[`players/${playerID}/hand`] = hand
+        updates[`players/${playerID}/hand`] = hand;
     }
     updates['deck'] = deck;
 
@@ -446,17 +439,19 @@ async function playCard(idx) {
     if (!game) return;
     const me = (game.players || {})[myId];
     if (!me) return;
-    const hand = me.hand || [];
-    if (idx >= hand.length) return;
+    const hand = me.hand || {};
 
     const card = hand[idx];
-    const newHand = hand.filter((_, i) => i !== idx);
+    if (!card) return; // slot is empty
+
     const pile = [...(game.pile || []), card];
     const next = (game.turnIndex + 1) % playerOrder.length;
-    const log = [...(game.log || []),
-        `<span class="log-name">${me.name}</span> played <span class="log-card">${cardLabel(card)}</span>`];
 
-    await gameRef.update({ [`players/${myId}/hand`]: newHand, pile, turnIndex: next, log });
+    await gameRef.update({
+        [`players/${myId}/hand/${idx}`]: null, // null = remove slot
+        pile,
+        turnIndex: next
+    });
 }
 
 async function drawCard() {
@@ -467,27 +462,100 @@ async function drawCard() {
     const deck = game.deck || [];
     if (deck.length === 0) { showError('The deck is empty!'); return; }
 
+    const me = (game.players || {})[myId];
+    const hand = me.hand || {};
     const card = deck[deck.length - 1];
     const newDeck = deck.slice(0, -1);
-    const me = (game.players || {})[myId];
-    const newHand = [...(me.hand || []), card];
-    const next = (game.turnIndex + 1) % playerOrder.length;
-    const log = [...(game.log || []),
-        `<span class="log-name">${me.name}</span> drew a card`];
 
-    await gameRef.update({ deck: newDeck, [`players/${myId}/hand`]: newHand, turnIndex: next, log });
+    await gameRef.update({ deck: newDeck });
+
+    showDrawnCard(card, hand);
 }
 
-async function passTurn() {
-    if (!isMyTurn) return;
-    const snap = await gameRef.once('value');
-    const game = snap.val();
-    if (!game) return;
-    const me = (game.players || {})[myId];
-    const next = (game.turnIndex + 1) % playerOrder.length;
-    const log = [...(game.log || []),
-        `<span class="log-name">${me ? me.name : 'Someone'}</span> passed`];
-    await gameRef.update({ turnIndex: next, log });
+function showDrawnCard(card, hand) {
+
+    document.getElementById('drawBtn').disabled = true;
+    document.getElementById('comboBtn').disabled = true;
+
+    const centerZone = document.getElementById('centerZone');
+    const container = document.createElement('div');
+    container.classList.add('popup-container');
+    container.id = 'popup-container';
+
+    const popupCard = buildCard(card, false, false);
+    popupCard.classList.add('popup-card');
+
+    const discardBtn = document.createElement('button');
+    discardBtn.classList.add('btn-discard');
+    discardBtn.classList.add('btn-primary');
+
+    discardBtn.innerHTML = 'Discard <br><i class="fa fa-trash"></i>';
+    discardBtn.addEventListener('click', async () => {
+        container.remove();
+        document.getElementById('drawBtn').disabled = false;
+        document.getElementById('comboBtn').disabled = false;
+        
+        // i can't believe this worked but this needs to be a transaction otherwise i double count cards in the pile
+        await gameRef.child('pile').transaction(current => {
+            const arr = current || [];
+            return [...arr, oldCard];
+        });
+    });
+
+    container.appendChild(popupCard);
+    container.appendChild(discardBtn);
+    centerZone.appendChild(container);
+
+    highlightHandForSwap(card, hand, container);
+}
+
+function highlightHandForSwap(drawnCard, hand, container) {
+    const slots = document.querySelectorAll('#handCards .card-slot');
+    Object.keys(hand).filter(k => hand[k]).forEach(k => {
+        // this is so weird but timing is off so i have to capture the card out here first
+        const originalCard = hand[k];
+        const slot = slots[Number(k)];
+        if (!slot) return;
+        slot.classList.add('swap-target');
+        slot.addEventListener('click', async function onSwap() {
+            container.remove();
+            document.getElementById('drawBtn').disabled = false;
+            document.getElementById('comboBtn').disabled = false;
+
+            const snap = await gameRef.once('value');
+            const game = snap.val();
+            const oldCard = originalCard;
+
+            // console.log("hand " + game.players[myId].hand);
+            // console.log("k " + k);
+            // console.log("old card " + oldCard);
+
+            // console.log("pile???" + game.pile);
+            const currentPile = game.pile || [];
+            // console.log("current pile "+ currentPile);
+            // console.log("pile before:", currentPile.length);
+            const pile = [...currentPile, oldCard];
+            const next = (game.turnIndex + 1) % playerOrder.length;
+
+            await gameRef.update({
+                [`players/${myId}/hand/${k}`]: drawnCard,
+                turnIndex: next
+            });
+        }, { once: true });
+    });
+}
+
+async function comboFunc() {
+    // if (!isMyTurn) return;
+    // const snap = await gameRef.once('value');
+    // const game = snap.val();
+    // if (!game) return;
+    // const me = (game.players || {})[myId];
+    // const next = (game.turnIndex + 1) % playerOrder.length;
+    // const log = [...(game.log || []),
+    //     `<span class="log-name">${me ? me.name : 'Someone'}</span> passed`];
+    // await gameRef.update({ turnIndex: next, log });
+    console.log("combo!")
 }
 
 

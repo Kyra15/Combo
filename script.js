@@ -489,7 +489,7 @@ function showDrawnCard(card, hand) {
     discardBtn.classList.add('btn-discard');
     discardBtn.classList.add('btn-primary');
 
-    discardBtn.innerHTML = 'Discard <br><i class="fa fa-trash"></i>';
+    discardBtn.innerHTML = 'Discard <span style="margin-left: 8px;"><i class="fa fa-trash"></i></span>';
     discardBtn.addEventListener('click', async () => {
         container.remove();
         document.getElementById('drawBtn').disabled = false;
@@ -498,7 +498,7 @@ function showDrawnCard(card, hand) {
         // i can't believe this worked but this needs to be a transaction otherwise i double count cards in the pile
         await gameRef.child('pile').transaction(current => {
             const arr = current || [];
-            return [...arr, oldCard];
+            return [...arr, card];
         });
     });
 

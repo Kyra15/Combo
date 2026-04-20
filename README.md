@@ -24,4 +24,6 @@ todo:
     - ~~matches have to start when the host says so~~
     - everyone has to use the same deck (also make it end after 2 decks have been used)
     - ~~get rid of weird popup thingy for each card swap~~
-    - fix slap thing it doesnt work! :3
+    - ~~fix slap thing it doesnt work!~~
+        - add slap notification on all screens
+    - fix frame sizing

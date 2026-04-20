@@ -25,6 +25,7 @@ let isMyTurn = false;
 let playerOrder = [];
 let presenceRef = null;
 let lastRenderedStatus = null;
+let lastRenderedSwapTs = null;
 
 const SUITS = ['♠', '♥', '♦', '♣'];
 const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
@@ -34,8 +35,8 @@ const MAX_DECKS = 2;
 
 function cardValue(card) {
     if (!card) return 0;
-    if (card.rank === 'K') return 0;
-    if (card.rank === 'A') return 1;
+    if (card.rank === 'K') return 1;
+    if (card.rank === 'A') return 0;
     if (card.rank === 'J' || card.rank === 'Q') return 10;
     return parseInt(card.rank, 10);
 }
@@ -127,7 +128,6 @@ async function registerPresence() {
         }
     });
 }
-
 async function cleanupIfEmpty() {
     if (!currentGameId) return;
     try {
@@ -145,16 +145,13 @@ function loadgames() {
     const list = document.getElementById('gamesList');
     list.innerHTML = '<div class="no-games">Looking for open games…</div>';
 
-    db.ref('card_games').limitToLast(20).on('value', snap => {
+    db.ref('card_games').limitToLast(20).once('value').then(snap => {
         list.innerHTML = '';
         const items = [];
-
         snap.forEach(child => {
             const g = child.val();
             if (!g || !g.players) return;
-
             const count = Object.keys(g.players).length;
-
             if (count < MAX_PLAYERS && g.status === 'waiting') {
                 items.push({ key: child.key, game: g, count });
             }
@@ -181,7 +178,7 @@ function loadgames() {
             });
             list.appendChild(div);
         });
-    });
+    }).catch(err => showError('Could not load games: ' + err.message));
 }
 
 function getName() {
@@ -397,6 +394,12 @@ function renderGame(game) {
 
     if (game.status === 'gameover' && lastRenderedStatus !== 'gameover') {
         showGameOver(game);
+    }
+
+    // Show swap notification to all players when a swap happens
+    if (game.lastSwap && game.lastSwap.ts !== lastRenderedSwapTs) {
+        lastRenderedSwapTs = game.lastSwap.ts;
+        showSwapNotification(game.lastSwap, game.players || {});
     }
 
     lastRenderedStatus = game.status;
@@ -784,7 +787,16 @@ function highlightHandForSwap(drawnCard, hand, container, isBlind, game) {
             const updates = {
                 [`players/${myId}/hand/${k}`]: drawnCard,
                 pile,
-                turnIndex: next
+                turnIndex: next,
+                lastSwap: {
+                    type: 'self',
+                    actorId: myId,
+                    actorName: myName,
+                    actorSlot: parseInt(k),
+                    drawnCard: drawnCard,
+                    discardedCard: originalCard,
+                    ts: Date.now()
+                }
             };
 
             if (g.comboCalled) {
@@ -891,7 +903,17 @@ async function executeJackSwap(drawnCard, mySlot, oppChoice) {
         [`players/${myId}/hand/${mySlot}`]: oppCard,
         [`players/${oppChoice.pid}/hand/${oppChoice.slot}`]: myCard,
         pile,
-        turnIndex: next
+        turnIndex: next,
+        lastSwap: {
+            type: 'jack',
+            actorId: myId,
+            actorName: myName,
+            actorSlot: mySlot,
+            targetId: oppChoice.pid,
+            targetName: (g.players[oppChoice.pid] || {}).name || '?',
+            targetSlot: oppChoice.slot,
+            ts: Date.now()
+        }
     };
     if (g.comboCalled) {
         const r = (g.roundsAfterCombo || 0) + 1;
@@ -1033,7 +1055,17 @@ async function executeQueenSwap(drawnCard, mySlot, oppPid, oppSlot) {
         [`players/${myId}/hand/${mySlot}`]: oppCard,
         [`players/${oppPid}/hand/${oppSlot}`]: myCard,
         pile,
-        turnIndex: next
+        turnIndex: next,
+        lastSwap: {
+            type: 'queen',
+            actorId: myId,
+            actorName: myName,
+            actorSlot: mySlot,
+            targetId: oppPid,
+            targetName: (g.players[oppPid] || {}).name || '?',
+            targetSlot: oppSlot,
+            ts: Date.now()
+        }
     };
     if (g.comboCalled) {
         const r = (g.roundsAfterCombo || 0) + 1;
@@ -1189,6 +1221,40 @@ async function comboFunc() {
     await gameRef.update(updates);
 }
 
+// ── Swap notification (shown to all players) ──────────────────────────────────
+function showSwapNotification(swap, players) {
+    const existing = document.getElementById('swap-notification');
+    if (existing) existing.remove();
+
+    const el = document.createElement('div');
+    el.id = 'swap-notification';
+    el.className = 'swap-notification';
+
+    let msg = '';
+    const isMe = swap.actorId === myId;
+    const actorLabel = isMe ? 'You' : swap.actorName;
+
+    if (swap.type === 'self') {
+        // Drew a card and swapped into own hand
+        const discarded = swap.discardedCard;
+        const drawn = swap.drawnCard;
+        msg = `${actorLabel} swapped slot ${swap.actorSlot + 1} `
+            + `<span class="sn-card ${isRed(discarded) ? 'red' : ''}">${discarded.rank}${discarded.suit}</span> `
+            + `→ <span class="sn-card ${isRed(drawn) ? 'red' : ''}">${drawn.rank}${drawn.suit}</span>`;
+    } else {
+        // Jack or Queen: two-player swap
+        const targetIsMe = swap.targetId === myId;
+        const targetLabel = targetIsMe ? 'you' : swap.targetName;
+        msg = `${actorLabel} swapped their slot ${swap.actorSlot + 1} with ${targetLabel}'s slot ${swap.targetSlot + 1}`;
+    }
+
+    el.innerHTML = `<span class="sn-icon">⇄</span> ${msg}`;
+    document.getElementById('centerZone').appendChild(el);
+
+    // Auto-dismiss after 3.5s
+    setTimeout(() => { if (el.parentNode) el.remove(); }, 3500);
+}
+
 // ── Game Over ─────────────────────────────────────────────────────────────────
 function showGameOver(game) {
     const players = game.players || {};
@@ -1263,6 +1329,7 @@ async function leavegame() {
     currentGameId = '';
     isMyTurn = false;
     playerOrder = [];
+    lastRenderedSwapTs = null;
     myId = genId(); // fresh ID so next create/join starts clean
     document.getElementById('gameId').value = '';
 

@@ -10,13 +10,16 @@ todo:
 - ~~fix bug with joining game using id~~
 - ~~fix weird thing with like removing cards from your hand~~
 - actual game mechanics:
-    - draw cards to look at
-    - put card down or swap
-    - jack mechanic -> blind swap
-    - queen mechanic -> look swap
+    - ~~draw cards to look at~~
+    - ~~put card down or swap~~
+    - ~~jack mechanic -> blind swap~~
+    - ~~queen mechanic -> look swap~~
     - 7/8 mechanic -> look at one of your own
+        - works, but UI is clunky
     - 9/10 mechanic -> look at one of someone else's
-    - call combo
-    - calculate score and declare winner
-    - matches have to start when the host says so
+        - works, but UI is clunky
+    - ~~call combo~~
+    - ~~calculate score and declare winner~~
+    - ~~matches have to start when the host says so~~
     - everyone has to use the same deck (also make it end after 2 decks have been used)
+    - get rid of weird popup thingy for each card swap

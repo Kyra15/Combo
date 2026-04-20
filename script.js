@@ -373,7 +373,7 @@ function renderGame(game) {
 }
 
 function renderWaitingHand() {
-    const container = document.getElementById('handCards');
+    const container = document.getElementById('handZone');
     container.innerHTML = '<div class="waiting-message">Waiting for host to start the game…</div>';
 }
 

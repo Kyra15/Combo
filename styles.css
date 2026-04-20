@@ -32,6 +32,7 @@ body {
     background: var(--tan);
     color: var(--brown);
     max-height: 100dvh;
+    height: 100dvh;
 }
 
 .screen { position: relative; min-height: 100dvh; height: 100%;}

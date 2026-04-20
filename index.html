@@ -1,87 +1,83 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Combo!</title>
-    <link rel="stylesheet" href="styles.css">
-    <link href="https://fonts.googleapis.com/css2?family=Jua&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-</head>
-<body>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Combo!</title>
+        <link rel="stylesheet" href="styles.css">
+        <link href="https://fonts.googleapis.com/css2?family=Jua&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    </head>
+    <body>
 
-<!-- ══════════ LOBBY ══════════ -->
-<div id="lobbyScreen" class="screen active">
+    <div id="lobbyScreen" class="screen active">
 
-    <div class="lobby-layout">
+        <div class="lobby-layout">
 
-        <!-- Left: name + create/join -->
-        <div class="lobby-left">
-            <div class="logo">
-                <h1>Combo!</h1>
-                <br>
+            <div class="lobby-left">
+                <div class="logo">
+                    <h1>Combo!</h1>
+                    <br>
+                </div>
+
+                <div class="field-group">
+                    <br>
+                    <label>Your Name</label>
+                    <input type="text" id="playerName" maxlength="20" autocomplete="off">
+                </div>
+
+                <button id="createBtn" class="btn-primary">Create New Game</button>
+
+                <div class="or-divider"><span>or join with ID</span></div>
+
+                <div class="join-row">
+                    <input type="text" id="gameId" placeholder="Paste a game ID (4 digits)…" maxlength="40" autocomplete="off">
+                    <button id="joinBtn" class="btn-join">Join</button>
+                </div>
+
+                <div id="error" class="error-msg"></div>
             </div>
 
-            <div class="field-group">
-                <br>
-                <label>Your Name</label>
-                <input type="text" id="playerName" maxlength="20" autocomplete="off">
+            <div class="lobby-right">
+                <div class="games-header">
+                    <span>Open Games</span>
+                    <button class="btn-refresh" id="refreshBtn">↺</button>
+                </div>
+                <div id="gamesList" class="game-list"></div>
             </div>
 
-            <button id="createBtn" class="btn-primary">✦ Create New Game</button>
-
-            <div class="or-divider"><span>or join with ID</span></div>
-
-            <div class="join-row">
-                <input type="text" id="gameId" placeholder="Paste a game ID (4 digits)…" maxlength="40" autocomplete="off">
-                <button id="joinBtn" class="btn-join">Join</button>
-            </div>
-
-            <div id="error" class="error-msg"></div>
-        </div>
-
-        <!-- Right: open games list -->
-        <div class="lobby-right">
-            <div class="games-header">
-                <span>Open Games</span>
-                <button class="btn-refresh" id="refreshBtn">↺</button>
-            </div>
-            <div id="gamesList" class="game-list"></div>
-        </div>
-
-    </div>
-</div>
-
-<!-- ══════════ GAME ══════════ -->
-<div id="gameScreen" class="screen hidden">
-
-    <header class="top-bar">
-        <div class="game-id-display" id="gameIdDisplay"></div>
-        <div class="turn-badge" id="turnBadge">Waiting…</div>
-        <button class="btn-leave" id="leaveBtn">Leave Game</button>
-    </header>
-
-    <div class="players-ring" id="playersRing"></div>
-
-    <div class="center-zone" id="centerZone">
-        <div class="pile-stack" id="pileStack">
-            <div class="pile-empty">No cards yet</div>
-        </div>
-        <!-- Start button shown only to host in waiting state -->
-        <button id="startBtn" class="btn-primary btn-start" style="display:none;">▶ Start Game</button>
-    </div>
-
-    <div class="hand-zone">
-        <div class="hand-cards" id="handCards"></div>
-        <div class="hand-actions">
-            <button class="btn-action" id="drawBtn">Draw Card</button>
-            <button class="btn-action btn-combo" id="comboBtn">Call Combo</button>
         </div>
     </div>
-</div>
 
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
-<script src="script.js"></script>
-</body>
+    <!-- ══════════ GAME ══════════ -->
+    <div id="gameScreen" class="screen hidden">
+
+        <header class="top-bar">
+            <div class="game-id-display" id="gameIdDisplay"></div>
+            <div class="turn-badge" id="turnBadge">Waiting…</div>
+            <button class="btn-leave" id="leaveBtn">Leave Game</button>
+        </header>
+
+        <div class="players-ring" id="playersRing"></div>
+
+        <div class="center-zone" id="centerZone">
+            <div class="pile-stack" id="pileStack">
+                <div class="pile-empty">No cards yet</div>
+            </div>
+            <button id="startBtn" class="btn-primary btn-start" style="display:none;">&#9658; Start Game</button>
+        </div>
+
+        <div class="hand-zone">
+            <div class="hand-cards" id="handCards"></div>
+            <div class="hand-actions">
+                <button class="btn-action" id="drawBtn">Draw Card</button>
+                <button class="btn-action btn-combo" id="comboBtn">Call Combo</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    <script src="script.js"></script>
+    </body>
 </html>

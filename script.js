@@ -16,7 +16,7 @@ try {
     console.error('firebase init error:', e);
 }
 
-// vars
+// init vars
 let myName = '';
 let myId = '';
 let currentGameId = '';
@@ -26,12 +26,12 @@ let playerOrder = [];
 let presenceRef = null;
 let lastRenderedStatus = null;
 let lastRenderedSwapTs = null;
+let snapLocked = false; // prevents double-firing on rapid clicks
 
 const SUITS = ['♠', '♥', '♦', '♣'];
 const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 const MAX_PLAYERS = 8;
 const CARDS_PER_HAND = 4;
-const MAX_DECKS = 2;
 
 function cardValue(card) {
     if (!card) return 0;
@@ -45,22 +45,13 @@ function genId() {
     return 'p_' + Math.random().toString(36).substr(2, 9);
 }
 
-// build the deck
-function buildDeck() {
-    const deck = [];
-    for (const suit of SUITS)
-        for (const rank of RANKS)
-            deck.push({ rank, suit, id: rank + suit });
-    return shuffle(deck);
-}
-
+// deck
 function buildDoubleDeck() {
     const deck = [];
-    for (let d = 0; d < 2; d++) {
+    for (let d = 0; d < 2; d++)
         for (const suit of SUITS)
             for (const rank of RANKS)
                 deck.push({ rank, suit, id: rank + suit + '_' + d });
-    }
     return shuffle(deck);
 }
 
@@ -75,6 +66,7 @@ function shuffle(arr) {
 
 function isRed(c) { return c.suit === '♥' || c.suit === '♦'; }
 
+// ── DOM Ready ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     myId = genId();
 
@@ -102,36 +94,26 @@ document.addEventListener('DOMContentLoaded', () => {
     loadgames();
 });
 
-// i hate this
+// dumb silly stuff
 async function registerPresence() {
     if (!db || !currentGameId) return;
-
     const connectedRef = db.ref('.info/connected');
-
     connectedRef.on('value', async (snap) => {
         if (snap.val() === true) {
             presenceRef = db.ref(`card_games/${currentGameId}/players/${myId}`);
-
             try { await presenceRef.onDisconnect().cancel(); } catch(e) {}
-
-            await presenceRef.set({
-                id: myId,
-                name: myName,
-                joinedAt: Date.now()
-            });
-
             presenceRef.onDisconnect().remove();
         }
     });
 }
+
 async function cleanupIfEmpty() {
     if (!currentGameId) return;
     try {
         const ref = db.ref(`card_games/${currentGameId}/players`);
         const snap = await ref.once('value');
-        if (!snap.exists() || Object.keys(snap.val() || {}).length === 0) {
+        if (!snap.exists() || Object.keys(snap.val() || {}).length === 0)
             await db.ref(`card_games/${currentGameId}`).remove();
-        }
     } catch(e) {}
 }
 
@@ -148,9 +130,8 @@ function loadgames() {
             const g = child.val();
             if (!g || !g.players) return;
             const count = Object.keys(g.players).length;
-            if (count < MAX_PLAYERS && g.status === 'waiting') {
+            if (count < MAX_PLAYERS && g.status === 'waiting')
                 items.push({ key: child.key, game: g, count });
-            }
         });
 
         if (items.length === 0) {
@@ -169,7 +150,7 @@ function loadgames() {
                 <div class="game-item-join">Join →</div>
             `;
             div.addEventListener('click', () => {
-                document.getElementById('gameId').value = key.replace("game_", "");
+                document.getElementById('gameId').value = key.replace('game_', '');
                 handleJoin();
             });
             list.appendChild(div);
@@ -189,16 +170,13 @@ async function handleCreate() {
     myName = name;
     myId = genId();
 
-    // clean up ahh games
     try {
         const allSnap = await db.ref('card_games').once('value');
         const cleanups = [];
         allSnap.forEach(child => {
             const g = child.val();
-            if (!g) return;
-            if (g.status === 'waiting' && g.host === myName) {
+            if (g && g.status === 'waiting' && g.host === myName)
                 cleanups.push(db.ref('card_games/' + child.key).remove());
-            }
         });
         await Promise.all(cleanups);
     } catch(e) {}
@@ -210,9 +188,9 @@ async function handleJoin() {
     const name = getName();
     if (!name) return;
     let gameId = document.getElementById('gameId').value.trim();
-    if (!gameId || gameId.toString().length != 4) { showError('Paste a game ID to join or create a new game'); return; }
+    if (!gameId || gameId.toString().length !== 4) { showError('Paste a game ID to join or create a new game'); return; }
     myName = name;
-    gameId = "game_" + gameId;
+    gameId = 'game_' + gameId;
     await enterGame(gameId, false);
 }
 
@@ -236,7 +214,6 @@ async function enterGame(gameId, isNew) {
                 pile: [],
                 turnIndex: 0,
                 playerOrder: [myId],
-                decksUsed: 0,
                 comboCalled: false,
                 comboCallerId: null,
                 roundsAfterCombo: 0,
@@ -260,7 +237,7 @@ async function enterGame(gameId, isNew) {
             const existing = Object.values(players).find(p => p.name === myName);
 
             if (existing) {
-                myId = existing.id; // rejoin as same player in this specific game
+                myId = existing.id;
             } else {
                 if (playerCount >= MAX_PLAYERS) { showError('Game is full'); return; }
             }
@@ -275,9 +252,8 @@ async function enterGame(gameId, isNew) {
                 joinedAt: Date.now(),
                 score: existing ? (existing.score || 0) : 0
             };
-            if (!currentOrder.includes(myId)) {
+            if (!currentOrder.includes(myId))
                 updates['playerOrder'] = [...currentOrder, myId];
-            }
             await gameRef.update(updates);
         }
 
@@ -307,9 +283,7 @@ async function startGame() {
     let deckCopy = [...deck];
     for (const pid of order) {
         const hand = {};
-        for (let i = 0; i < CARDS_PER_HAND; i++) {
-            hand[i] = deckCopy.pop();
-        }
+        for (let i = 0; i < CARDS_PER_HAND; i++) hand[i] = deckCopy.pop();
         updates[`players/${pid}/hand`] = hand;
         updates[`players/${pid}/peekedSlots`] = { 0: true, 1: true };
         updates[`players/${pid}/hasActed`] = false;
@@ -327,13 +301,13 @@ async function startGame() {
     await gameRef.update(updates);
 }
 
-// inits
+// screens
 function showGameScreen() {
     document.getElementById('lobbyScreen').classList.remove('active');
     document.getElementById('lobbyScreen').classList.add('hidden');
     document.getElementById('gameScreen').classList.remove('hidden');
     document.getElementById('gameScreen').classList.add('active');
-    document.getElementById('gameIdDisplay').textContent = `game ID: ${currentGameId.replace("game_", "")}`;
+    document.getElementById('gameIdDisplay').textContent = `game ID: ${currentGameId.replace('game_', '')}`;
 }
 
 function showLobbyScreen() {
@@ -360,7 +334,7 @@ function listenToGame() {
     });
 }
 
-// render
+// render like p1
 function renderGame(game) {
     const players = game.players || {};
     playerOrder = game.playerOrder || Object.keys(players).sort((a, b) =>
@@ -373,7 +347,7 @@ function renderGame(game) {
     const me = players[myId];
 
     renderPlayers(players, currentTurnId, game);
-    renderPile(game.pile || [], game);
+    renderPile(game.pile || []);
 
     if (game.status === 'waiting') {
         renderWaitingHand();
@@ -387,11 +361,9 @@ function renderGame(game) {
     const startBtn = document.getElementById('startBtn');
     startBtn.style.display = (game.status === 'waiting' && game.hostId === myId) ? 'block' : 'none';
 
-    if (game.status === 'gameover' && lastRenderedStatus !== 'gameover') {
+    if (game.status === 'gameover' && lastRenderedStatus !== 'gameover')
         showGameOver(game);
-    }
 
-    // swap notifs
     if (game.lastSwap && game.lastSwap.ts !== lastRenderedSwapTs) {
         lastRenderedSwapTs = game.lastSwap.ts;
         showSwapNotification(game.lastSwap, game.players || {});
@@ -402,7 +374,6 @@ function renderGame(game) {
 
 function renderWaitingHand() {
     const container = document.getElementById('handCards');
-    container.innerHTML = '';
     container.innerHTML = '<div class="waiting-message">Waiting for host to start the game…</div>';
 }
 
@@ -432,7 +403,7 @@ function renderPlayers(players, currentTurnId, game) {
         });
 }
 
-function renderPile(pile, game) {
+function renderPile(pile) {
     const stack = document.getElementById('pileStack');
     stack.innerHTML = '';
 
@@ -452,18 +423,15 @@ function renderPile(pile, game) {
         if (i < arr.length - 1) el.style.opacity = '0.7';
         stack.appendChild(el);
     });
-
-
 }
 
-// render hand
+// render
 function renderHand(hand, peekedSlots, status, game) {
     const container = document.getElementById('handCards');
     container.innerHTML = '';
 
     const pile = game ? (game.pile || []) : [];
     const topCard = pile.length > 0 ? pile[pile.length - 1] : null;
-    const snapRank = topCard ? topCard.rank : null;
 
     const allKeys = Object.keys(hand).map(Number);
     const numSlots = allKeys.length === 0 ? CARDS_PER_HAND : Math.max(...allKeys) + 1;
@@ -476,88 +444,19 @@ function renderHand(hand, peekedSlots, status, game) {
         if (card) {
             const isPeeked = !!(peekedSlots && peekedSlots[i]);
             const el = buildCard(card, false, !isPeeked);
+            slot.appendChild(el);
+
             if (status === 'playing') {
-                slot.style.cursor = 'pointer';
+                // Glow green if the player knows this card and it matches the top of pile
+                if (isPeeked && topCard && card.rank === topCard.rank) {
+                    slot.classList.add('snap-eligible');
+                }
                 slot.addEventListener('click', () => attemptSnap(i, hand, game));
             }
-
-            slot.appendChild(el);
         }
 
         container.appendChild(slot);
     }
-}
-
-// slap
-async function attemptSnap(slotIndex, localHand, localGame) {
-    if (snapLocked) return;
-    if (document.getElementById('popup-container')) return;
-    if (!gameRef) return;
-
-    snapLocked = true;
-    try {
-        const snap = await gameRef.once('value');
-        const game = snap.val();
-        if (!game || game.status !== 'playing') return;
-
-        const me = (game.players || {})[myId];
-        if (!me) return;
-        const hand = me.hand || {};
-        const card = hand[slotIndex];
-        if (!card) return;
-
-        const pile = game.pile || [];
-        const topCard = pile.length > 0 ? pile[pile.length - 1] : null;
-
-        if (topCard && card.rank === topCard.rank) {
-            // good slap
-            const newHand = { ...hand };
-            delete newHand[slotIndex];
-            const newPile = [...pile, card];
-
-            const updates = {
-                [`players/${myId}/hand`]: newHand,
-                pile: newPile
-            };
-            await gameRef.update(updates);
-            showSnapFeedback(true, card);
-        } else {
-            // bad slap
-            const deck = game.deck || [];
-            if (deck.length === 0) {
-                showSnapFeedback(false, card);
-                return;
-            }
-            const penaltyCard = deck[deck.length - 1];
-            const newDeck = deck.slice(0, -1);
-
-            const existingSlots = Object.keys(hand).map(Number);
-            const newSlot = existingSlots.length > 0 ? Math.max(...existingSlots) + 1 : 0;
-            const updates = {
-                [`players/${myId}/hand/${newSlot}`]: penaltyCard,
-                deck: newDeck
-            };
-            await gameRef.update(updates);
-            showSnapFeedback(false, card);
-        }
-    } finally {
-        snapLocked = false;
-    }
-}
-
-function showSnapFeedback(success, card) {
-    const existing = document.getElementById('snap-feedback');
-    if (existing) existing.remove();
-
-    const el = document.createElement('div');
-    el.id = 'snap-feedback';
-    el.className = 'snap-feedback ' + (success ? 'snap-success' : 'snap-fail');
-    el.textContent = success
-        ? `✓ Snapped ${card.rank}!`
-        : `✗ Wrong! Penalty card drawn`;
-
-    document.getElementById('centerZone').appendChild(el);
-    setTimeout(() => el.remove(), 2000);
 }
 
 function buildCard(card, disabled, faceDown) {
@@ -585,6 +484,65 @@ function buildCard(card, disabled, faceDown) {
     return el;
 }
 
+// slapping stuff
+async function attemptSnap(slotIndex, localHand, localGame) {
+    if (snapLocked) return;
+    if (document.getElementById('popup-container')) return;
+    if (!gameRef) return;
+
+    snapLocked = true;
+    try {
+        const snap = await gameRef.once('value');
+        const game = snap.val();
+        if (!game || game.status !== 'playing') return;
+
+        const me = (game.players || {})[myId];
+        if (!me) return;
+        const hand = me.hand || {};
+        const card = hand[slotIndex];
+        if (!card) return;
+
+        const pile = game.pile || [];
+        const topCard = pile.length > 0 ? pile[pile.length - 1] : null;
+
+        if (topCard && card.rank === topCard.rank) {
+            await gameRef.update({
+                [`players/${myId}/hand/${slotIndex}`]: null,
+                pile: [...pile, card]
+            });
+            showSnapFeedback(true, card);
+        } else {
+            const deck = game.deck || [];
+            if (deck.length > 0) {
+                const penaltyCard = deck[deck.length - 1];
+                const existingSlots = Object.keys(hand).map(Number);
+                const newSlot = existingSlots.length > 0 ? Math.max(...existingSlots) + 1 : 0;
+                await gameRef.update({
+                    [`players/${myId}/hand/${newSlot}`]: penaltyCard,
+                    deck: deck.slice(0, -1)
+                });
+            }
+            showSnapFeedback(false, card);
+        }
+    } finally {
+        snapLocked = false;
+    }
+}
+
+function showSnapFeedback(success, card) {
+    const existing = document.getElementById('snap-feedback');
+    if (existing) existing.remove();
+
+    const el = document.createElement('div');
+    el.id = 'snap-feedback';
+    el.className = 'snap-feedback ' + (success ? 'snap-success' : 'snap-fail');
+    el.textContent = success ? `✓ Slapped ${card.rank}!` : `✗ Wrong! Penalty card drawn`;
+
+    document.getElementById('centerZone').appendChild(el);
+    setTimeout(() => { if (el.parentNode) el.remove(); }, 2000);
+}
+
+// turn funcs
 function renderTurnBadge(players, currentTurnId, game) {
     const badge = document.getElementById('turnBadge');
     if (game.status === 'waiting') {
@@ -598,7 +556,7 @@ function renderTurnBadge(players, currentTurnId, game) {
         return;
     }
     const p = players[currentTurnId];
-    if (!p) { badge.textContent = 'Waiting for players…'; badge.classList.remove('your-turn'); return; }
+    if (!p) { badge.textContent = 'Waiting…'; badge.classList.remove('your-turn'); return; }
     if (currentTurnId === myId) {
         badge.textContent = game.comboCalled ? 'Your Turn! (Last round)' : 'Your Turn!';
         badge.classList.add('your-turn');
@@ -621,7 +579,6 @@ function updateButtons(game) {
     comboBtn.textContent = game.comboCalled ? 'Combo Called!' : 'Call Combo';
 }
 
-// turn stuff
 function nextTurnIndex(game) {
     return (game.turnIndex + 1) % playerOrder.length;
 }
@@ -653,17 +610,15 @@ async function drawCard() {
 
     const me = (game.players || {})[myId];
     const hand = me ? (me.hand || {}) : {};
-
     showDrawnCard(card, hand, game);
 }
 
-// drawn card popup
+// card popup
 function showDrawnCard(card, hand, game) {
     document.getElementById('drawBtn').disabled = true;
     document.getElementById('comboBtn').disabled = true;
 
     const centerZone = document.getElementById('centerZone');
-
     const existing = document.getElementById('popup-container');
     if (existing) existing.remove();
 
@@ -708,27 +663,25 @@ function showDrawnCard(card, hand, game) {
     } else if (rank === '9' || rank === '10') {
         showSpecialCardChoice(card, hand, container, game, 'opp');
     } else {
-        highlightHandForSwap(card, hand, container, false, game);
+        highlightHandForSwap(card, hand, container, game);
     }
 }
 
 function getSpecialCardLabel(card) {
-    switch(card.rank) {
-        case 'J': return 'Jack — Blind swap with any player';
-        case 'Q': return 'Queen — Peek at any card, then optionally swap';
-        case '7': return '7/8 — Peek at one of your own cards';
-        case '8': return '7/8 — Peek at one of your own cards';
-        case '9': return '9/10 — Peek at an opponent\'s card';
-        case '10': return '9/10 — Peek at an opponent\'s card';
-        default: return null;
+    switch (card.rank) {
+        case 'J':  return 'Jack — Blind swap with any player';
+        case 'Q':  return 'Queen — Peek at opponent\'s card, then optionally swap';
+        case '7':
+        case '8':  return '7 / 8 — Peek at one of your own cards';
+        case '9':
+        case '10': return '9 / 10 — Peek at an opponent\'s card';
+        default:   return null;
     }
 }
 
-// discard func
+// discard + turn mechs
 async function discardDrawnCard(card, game) {
-    await gameRef.child('pile').transaction(current => {
-        return [...(current || []), card];
-    });
+    await gameRef.child('pile').transaction(current => [...(current || []), card]);
 
     const snap = await gameRef.once('value');
     const g = snap.val();
@@ -738,16 +691,14 @@ async function discardDrawnCard(card, game) {
     if (g.comboCalled) {
         const newRounds = (g.roundsAfterCombo || 0) + 1;
         updates['roundsAfterCombo'] = newRounds;
-        if (newRounds >= playerOrder.length - 1) {
-            updates['status'] = 'gameover';
-        }
+        if (newRounds >= playerOrder.length - 1) updates['status'] = 'gameover';
     }
 
     await gameRef.update(updates);
 }
 
-// highlight swaps
-function highlightHandForSwap(drawnCard, hand, container, isBlind, game) {
+// noraml higlighting stuff
+function highlightHandForSwap(drawnCard, hand, container, game) {
     const slots = document.querySelectorAll('#handCards .card-slot');
     Object.keys(hand).filter(k => hand[k]).forEach(k => {
         const originalCard = hand[k];
@@ -755,13 +706,13 @@ function highlightHandForSwap(drawnCard, hand, container, isBlind, game) {
         if (!slot) return;
         slot.classList.add('swap-target');
         slot.addEventListener('click', async function onSwap() {
-            slot.classList.remove('swap-target');
+            document.querySelectorAll('#handCards .card-slot.swap-target')
+                .forEach(s => s.classList.remove('swap-target'));
             container.remove();
 
             const snap = await gameRef.once('value');
             const g = snap.val();
-            const currentPile = g.pile || [];
-            const pile = [...currentPile, originalCard];
+            const pile = [...(g.pile || []), originalCard];
             const next = nextTurnIndex(g);
 
             const updates = {
@@ -773,8 +724,6 @@ function highlightHandForSwap(drawnCard, hand, container, isBlind, game) {
                     actorId: myId,
                     actorName: myName,
                     actorSlot: parseInt(k),
-                    drawnCard: drawnCard,
-                    discardedCard: originalCard,
                     ts: Date.now()
                 }
             };
@@ -782,18 +731,15 @@ function highlightHandForSwap(drawnCard, hand, container, isBlind, game) {
             if (g.comboCalled) {
                 const newRounds = (g.roundsAfterCombo || 0) + 1;
                 updates['roundsAfterCombo'] = newRounds;
-                if (newRounds >= playerOrder.length - 1) {
-                    updates['status'] = 'gameover';
-                }
+                if (newRounds >= playerOrder.length - 1) updates['status'] = 'gameover';
             }
 
             await gameRef.update(updates);
-            document.querySelectorAll('#handCards .card-slot.swap-target').forEach(s => s.classList.remove('swap-target'));
         }, { once: true });
     });
 }
 
-// jack funcs
+// jack blind swap funcs
 function showJackOptions(drawnCard, myHand, container, game) {
     const opponents = Object.entries(game.players || {}).filter(([pid]) => pid !== myId);
     if (opponents.length === 0) return;
@@ -802,70 +748,55 @@ function showJackOptions(drawnCard, myHand, container, game) {
     area.className = 'swap-picker';
     container.appendChild(area);
 
-    let selectedOpp = null;  // { pid, slot }
-    let selectedMine = null; // slot index
-
-    function render() {
-        area.innerHTML = '';
-
-        // ── Their cards ──
-        const theirLabel = document.createElement('div');
-        theirLabel.className = 'swap-section-label';
-        theirLabel.textContent = 'Swap one of their cards…';
-        area.appendChild(theirLabel);
-
-        const theirGrid = document.createElement('div');
-        theirGrid.className = 'swap-grid';
-
+    function renderPickOpponent() {
+        area.innerHTML = '<span class="swap-section-label">Whose card do you want?</span>';
+        const grid = document.createElement('div');
+        grid.className = 'swap-grid';
         opponents.forEach(([pid, p]) => {
-            const oppHand = p.hand || {};
-            Object.keys(oppHand).filter(k => oppHand[k]).forEach(k => {
-                const btn = document.createElement('div');
-                btn.className = 'swap-chip' + (selectedOpp && selectedOpp.pid === pid && selectedOpp.slot == k ? ' selected' : '');
-                btn.innerHTML = `<span class="swap-chip-player">${p.name}</span><span class="swap-chip-slot">Slot ${parseInt(k)+1}</span>`;
-                btn.addEventListener('click', () => {
-                    selectedOpp = { pid, slot: parseInt(k) };
-                    render();
-                });
-                theirGrid.appendChild(btn);
-            });
+            const chip = document.createElement('div');
+            chip.className = 'swap-chip';
+            chip.innerHTML = `<span class="swap-chip-player">${p.name}</span>`;
+            chip.addEventListener('click', () => renderPickOppSlot(pid, p));
+            grid.appendChild(chip);
         });
-        area.appendChild(theirGrid);
-
-        const myLabel = document.createElement('div');
-        myLabel.className = 'swap-section-label';
-        myLabel.textContent = '…with one of yours';
-        area.appendChild(myLabel);
-
-        const myGrid = document.createElement('div');
-        myGrid.className = 'swap-grid';
-
-        Object.keys(myHand).filter(k => myHand[k]).forEach(k => {
-            const btn = document.createElement('div');
-            btn.className = 'swap-chip mine' + (selectedMine == k ? ' selected' : '');
-            btn.innerHTML = `<span class="swap-chip-player">You</span><span class="swap-chip-slot">Slot ${parseInt(k)+1}</span>`;
-            btn.addEventListener('click', () => {
-                selectedMine = k;
-                render();
-            });
-            myGrid.appendChild(btn);
-        });
-        area.appendChild(myGrid);
-
-        // ── Confirm ──
-        if (selectedOpp !== null && selectedMine !== null) {
-            const confirmBtn = document.createElement('button');
-            confirmBtn.className = 'btn-confirm-swap';
-            confirmBtn.textContent = '⇄ Swap';
-            confirmBtn.addEventListener('click', async () => {
-                container.remove();
-                await executeJackSwap(drawnCard, parseInt(selectedMine), selectedOpp);
-            });
-            area.appendChild(confirmBtn);
-        }
+        area.appendChild(grid);
     }
 
-    render();
+    function renderPickOppSlot(pid, p) {
+        area.innerHTML = `<span class="swap-section-label">${p.name}'s slot (you won't see it)</span>`;
+        const grid = document.createElement('div');
+        grid.className = 'swap-grid';
+        const oppHand = p.hand || {};
+        Object.keys(oppHand).filter(k => oppHand[k]).forEach(k => {
+            const chip = document.createElement('div');
+            chip.className = 'swap-chip';
+            chip.innerHTML = `<span class="swap-chip-slot">Slot ${parseInt(k) + 1}</span>`;
+            chip.addEventListener('click', () => renderPickMySlot(pid, p, parseInt(k)));
+            grid.appendChild(chip);
+        });
+        appendBack(area, renderPickOpponent);
+        area.appendChild(grid);
+    }
+
+    function renderPickMySlot(oppPid, oppPlayer, oppSlot) {
+        area.innerHTML = '<span class="swap-section-label">Which of your slots?</span>';
+        const grid = document.createElement('div');
+        grid.className = 'swap-grid';
+        Object.keys(myHand).filter(k => myHand[k]).forEach(k => {
+            const chip = document.createElement('div');
+            chip.className = 'swap-chip mine';
+            chip.innerHTML = `<span class="swap-chip-slot">Slot ${parseInt(k) + 1}</span>`;
+            chip.addEventListener('click', async () => {
+                container.remove();
+                await executeJackSwap(drawnCard, parseInt(k), { pid: oppPid, slot: oppSlot });
+            });
+            grid.appendChild(chip);
+        });
+        appendBack(area, () => renderPickOppSlot(oppPid, oppPlayer));
+        area.appendChild(grid);
+    }
+
+    renderPickOpponent();
 }
 
 async function executeJackSwap(drawnCard, mySlot, oppChoice) {
@@ -900,7 +831,7 @@ async function executeJackSwap(drawnCard, mySlot, oppChoice) {
     await gameRef.update(updates);
 }
 
-// queen mechs (make this a little sooner)
+// queen func
 function showQueenOptions(drawnCard, myHand, container, game) {
     const opponents = Object.entries(game.players || {}).filter(([pid]) => pid !== myId);
     if (opponents.length === 0) return;
@@ -909,112 +840,94 @@ function showQueenOptions(drawnCard, myHand, container, game) {
     area.className = 'swap-picker';
     container.appendChild(area);
 
-    let peekedInfo = null;   // { pid, slot, card }
-    let selectedMine = null;
-
-    function render() {
-        area.innerHTML = '';
-
-        if (!peekedInfo) {
-            const label = document.createElement('div');
-            label.className = 'swap-section-label';
-            label.textContent = 'Peek at which card?';
-            area.appendChild(label);
-
-            const grid = document.createElement('div');
-            grid.className = 'swap-grid';
-
-            opponents.forEach(([pid, p]) => {
-                const oppHand = p.hand || {};
-                Object.keys(oppHand).filter(k => oppHand[k]).forEach(k => {
-                    const btn = document.createElement('div');
-                    btn.className = 'swap-chip';
-                    btn.innerHTML = `<span class="swap-chip-player">${p.name}</span><span class="swap-chip-slot">Slot ${parseInt(k)+1}</span>`;
-                    btn.addEventListener('click', () => {
-                        peekedInfo = { pid, slot: parseInt(k), card: game.players[pid].hand[k] };
-                        render();
-                    });
-                    grid.appendChild(btn);
-                });
-            });
-            area.appendChild(grid);
-
-        } else {
-            // Step 2: show the peeked card + let them choose to swap or not
-            const peekRow = document.createElement('div');
-            peekRow.className = 'queen-peek-row';
-
-            const peekInfo = document.createElement('div');
-            const oppName = (game.players[peekedInfo.pid] || {}).name || '?';
-            peekInfo.className = 'swap-section-label';
-            peekInfo.textContent = `${oppName}'s slot ${peekedInfo.slot + 1}:`;
-            peekRow.appendChild(peekInfo);
-
-            const cardEl = buildCard(peekedInfo.card, false, false);
-            cardEl.style.width = '72px';
-            cardEl.style.height = '100px';
-            cardEl.style.cursor = 'default';
-            peekRow.appendChild(cardEl);
-            area.appendChild(peekRow);
-
-            const myLabel = document.createElement('div');
-            myLabel.className = 'swap-section-label';
-            myLabel.textContent = 'Swap with one of yours? (or discard Queen)';
-            area.appendChild(myLabel);
-
-            const myGrid = document.createElement('div');
-            myGrid.className = 'swap-grid';
-
-            Object.keys(myHand).filter(k => myHand[k]).forEach(k => {
-                const btn = document.createElement('div');
-                btn.className = 'swap-chip mine' + (selectedMine == k ? ' selected' : '');
-                btn.innerHTML = `<span class="swap-chip-player">You</span><span class="swap-chip-slot">Slot ${parseInt(k)+1}</span>`;
-                btn.addEventListener('click', () => {
-                    selectedMine = k;
-                    render();
-                });
-                myGrid.appendChild(btn);
-            });
-            area.appendChild(myGrid);
-
-            const actionRow = document.createElement('div');
-            actionRow.className = 'queen-action-row';
-
-            if (selectedMine !== null) {
-                const swapBtn = document.createElement('button');
-                swapBtn.className = 'btn-confirm-swap';
-                swapBtn.textContent = '⇄ Swap';
-                swapBtn.addEventListener('click', async () => {
-                    container.remove();
-                    await executeQueenSwap(drawnCard, parseInt(selectedMine), peekedInfo.pid, peekedInfo.slot);
-                });
-                actionRow.appendChild(swapBtn);
-            }
-
-            const discardQueenBtn = document.createElement('button');
-            discardQueenBtn.className = 'btn-discard-queen';
-            discardQueenBtn.textContent = 'Discard Queen';
-            discardQueenBtn.addEventListener('click', async () => {
-                container.remove();
-                await discardDrawnCard(drawnCard, game);
-            });
-            actionRow.appendChild(discardQueenBtn);
-
-            const backBtn = document.createElement('button');
-            backBtn.className = 'btn-discard-queen';
-            backBtn.textContent = '← Back';
-            backBtn.addEventListener('click', () => {
-                peekedInfo = null;
-                selectedMine = null;
-                render();
-            });
-            actionRow.appendChild(backBtn);
-
-            area.appendChild(actionRow);
-        }
+    function renderPickOpponent() {
+        area.innerHTML = '<span class="swap-section-label">Peek at whose card?</span>';
+        const grid = document.createElement('div');
+        grid.className = 'swap-grid';
+        opponents.forEach(([pid, p]) => {
+            const chip = document.createElement('div');
+            chip.className = 'swap-chip';
+            chip.innerHTML = `<span class="swap-chip-player">${p.name}</span>`;
+            chip.addEventListener('click', () => renderPickOppSlot(pid, p));
+            grid.appendChild(chip);
+        });
+        area.appendChild(grid);
     }
 
-    render();
+    function renderPickOppSlot(pid, p) {
+        area.innerHTML = `<span class="swap-section-label">Which of ${p.name}'s slots?</span>`;
+        const grid = document.createElement('div');
+        grid.className = 'swap-grid';
+        const oppHand = p.hand || {};
+        Object.keys(oppHand).filter(k => oppHand[k]).forEach(k => {
+            const chip = document.createElement('div');
+            chip.className = 'swap-chip';
+            chip.innerHTML = `<span class="swap-chip-slot">Slot ${parseInt(k) + 1}</span>`;
+            chip.addEventListener('click', () => renderPeekAndDecide(pid, p, parseInt(k)));
+            grid.appendChild(chip);
+        });
+        appendBack(area, renderPickOpponent);
+        area.appendChild(grid);
+    }
+
+    function renderPeekAndDecide(oppPid, oppPlayer, oppSlot) {
+        const oppCard = game.players[oppPid].hand[oppSlot];
+        area.innerHTML = '';
+
+        const peekRow = document.createElement('div');
+        peekRow.className = 'queen-peek-row';
+        const peekInfo = document.createElement('span');
+        peekInfo.className = 'swap-section-label';
+        peekInfo.textContent = `${oppPlayer.name}'s slot ${oppSlot + 1}:`;
+        peekRow.appendChild(peekInfo);
+        const cardEl = buildCard(oppCard, false, false);
+        cardEl.style.width = '72px';
+        cardEl.style.height = '100px';
+        cardEl.style.cursor = 'default';
+        peekRow.appendChild(cardEl);
+        area.appendChild(peekRow);
+
+        const myLabel = document.createElement('div');
+        myLabel.className = 'swap-section-label';
+        myLabel.textContent = 'Swap with one of yours, or discard the Queen:';
+        area.appendChild(myLabel);
+
+        const grid = document.createElement('div');
+        grid.className = 'swap-grid';
+        Object.keys(myHand).filter(k => myHand[k]).forEach(k => {
+            const chip = document.createElement('div');
+            chip.className = 'swap-chip mine';
+            chip.innerHTML = `<span class="swap-chip-slot">My slot ${parseInt(k) + 1}</span>`;
+            chip.addEventListener('click', async () => {
+                container.remove();
+                await executeQueenSwap(drawnCard, parseInt(k), oppPid, oppSlot);
+            });
+            grid.appendChild(chip);
+        });
+        area.appendChild(grid);
+
+        const actionRow = document.createElement('div');
+        actionRow.className = 'queen-action-row';
+
+        const discardQueenBtn = document.createElement('button');
+        discardQueenBtn.className = 'btn-discard-queen';
+        discardQueenBtn.textContent = 'Discard Queen';
+        discardQueenBtn.addEventListener('click', async () => {
+            container.remove();
+            await discardDrawnCard(drawnCard, game);
+        });
+        actionRow.appendChild(discardQueenBtn);
+
+        const backBtn = document.createElement('button');
+        backBtn.className = 'btn-discard-queen';
+        backBtn.textContent = '← Back';
+        backBtn.addEventListener('click', () => renderPickOppSlot(oppPid, oppPlayer));
+        actionRow.appendChild(backBtn);
+
+        area.appendChild(actionRow);
+    }
+
+    renderPickOpponent();
 }
 
 async function executeQueenSwap(drawnCard, mySlot, oppPid, oppSlot) {
@@ -1049,73 +962,56 @@ async function executeQueenSwap(drawnCard, mySlot, oppPid, oppSlot) {
     await gameRef.update(updates);
 }
 
-// 78910 mechs
-// own = peek your own card (7/8), opp = peek opponent's card (9/10)
+// 78910 peek funcs
 function showSpecialCardChoice(drawnCard, myHand, container, game, mode) {
     const area = document.createElement('div');
     area.className = 'special-choice-area';
     container.appendChild(area);
 
-    function showChoice() {
+    const useBtn = document.createElement('button');
+    useBtn.className = 'jack-slot-btn special-choice-btn';
+    useBtn.textContent = mode === 'own' ? 'Peek at your card' : "Peek at opponent's card";
+    useBtn.addEventListener('click', () => {
         area.innerHTML = '';
+        if (mode === 'own') showPeekOwnThenDiscard(drawnCard, myHand, area, container, game);
+        else showPeekOppThenDiscard(drawnCard, myHand, area, container, game);
+    });
 
-        const useBtn = document.createElement('button');
-        useBtn.className = 'jack-slot-btn special-choice-btn';
-        useBtn.textContent = mode === 'own' ? 'Peek at your card' : 'Peek at opponent\'s card';
-        useBtn.addEventListener('click', () => {
-            area.innerHTML = '';
-            if (mode === 'own') {
-                showPeekOwnThenDiscard(drawnCard, myHand, area, container, game);
-            } else {
-                showPeekOppThenDiscard(drawnCard, myHand, area, container, game);
-            }
-        });
+    const swapBtn = document.createElement('button');
+    swapBtn.className = 'jack-slot-btn special-choice-btn';
+    swapBtn.textContent = 'Swap with hand';
+    swapBtn.addEventListener('click', () => {
+        area.remove();
+        highlightHandForSwap(drawnCard, myHand, container, game);
+    });
 
-        const swapBtn = document.createElement('button');
-        swapBtn.className = 'jack-slot-btn special-choice-btn';
-        swapBtn.textContent = 'Swap with hand';
-        swapBtn.addEventListener('click', () => {
-            area.remove();
-            highlightHandForSwap(drawnCard, myHand, container, false, game);
-        });
-
-        area.appendChild(useBtn);
-        area.appendChild(swapBtn);
-    }
-
-    showChoice();
+    area.appendChild(useBtn);
+    area.appendChild(swapBtn);
 }
 
-// discard after use
 function showPeekOwnThenDiscard(drawnCard, myHand, area, container, game) {
     const myPeeked = (game.players[myId] || {}).peekedSlots || {};
     const slots = Object.keys(myHand).filter(k => myHand[k] && !myPeeked[k]);
 
     const label = document.createElement('div');
     label.className = 'special-action-label';
-    label.textContent = 'Pick one of your face-down cards to peek at:';
+    label.textContent = slots.length > 0 ? 'Pick a face-down card to peek at:' : 'No face-down cards left.';
     area.appendChild(label);
 
     const row = document.createElement('div');
     row.className = 'jack-row';
-
     slots.forEach(k => {
         const btn = document.createElement('button');
         btn.className = 'jack-slot-btn';
-        btn.textContent = `Slot ${parseInt(k)+1}`;
+        btn.textContent = `Slot ${parseInt(k) + 1}`;
         btn.addEventListener('click', () => {
-            showTempPeek(myHand[k], `Your slot ${parseInt(k)+1}`, async () => {
+            showTempPeek(myHand[k], `Your slot ${parseInt(k) + 1}`, async () => {
                 container.remove();
                 await discardDrawnCard(drawnCard, game);
             });
         });
         row.appendChild(btn);
     });
-
-    if (slots.length === 0) {
-        label.textContent = 'No face-down cards to peek at';
-    }
-
     area.appendChild(row);
 }
 
@@ -1124,20 +1020,19 @@ function showPeekOppThenDiscard(drawnCard, myHand, area, container, game) {
 
     const label = document.createElement('div');
     label.className = 'special-action-label';
-    label.textContent = 'Pick an opponent\'s card to peek at:';
+    label.textContent = "Pick an opponent's card to peek at:";
     area.appendChild(label);
 
     const row = document.createElement('div');
     row.className = 'jack-row';
-
     opponents.forEach(([pid, p]) => {
         const oppHand = p.hand || {};
         Object.keys(oppHand).filter(k => oppHand[k]).forEach(k => {
             const btn = document.createElement('button');
             btn.className = 'jack-slot-btn';
-            btn.textContent = `${p.name} #${parseInt(k)+1}`;
+            btn.textContent = `${p.name} #${parseInt(k) + 1}`;
             btn.addEventListener('click', () => {
-                showTempPeek(oppHand[k], `${p.name}'s slot ${parseInt(k)+1}`, async () => {
+                showTempPeek(oppHand[k], `${p.name}'s slot ${parseInt(k) + 1}`, async () => {
                     container.remove();
                     await discardDrawnCard(drawnCard, game);
                 });
@@ -1145,11 +1040,10 @@ function showPeekOppThenDiscard(drawnCard, myHand, area, container, game) {
             row.appendChild(btn);
         });
     });
-
     area.appendChild(row);
 }
 
-// peek overlay
+// peek
 function showTempPeek(card, labelText, onClose) {
     const existing = document.getElementById('temp-peek');
     if (existing) existing.remove();
@@ -1158,6 +1052,7 @@ function showTempPeek(card, labelText, onClose) {
     overlay.id = 'temp-peek';
     overlay.className = 'peek-overlay';
     overlay.innerHTML = `<div class="peek-label">👁 ${labelText}</div>`;
+
     const cardEl = buildCard(card, false, false);
     cardEl.style.width = '90px';
     cardEl.style.height = '126px';
@@ -1166,13 +1061,12 @@ function showTempPeek(card, labelText, onClose) {
     const closeBtn = document.createElement('button');
     closeBtn.className = 'btn-discard btn-primary';
     closeBtn.textContent = 'Got it';
-    closeBtn.addEventListener('click', () => {
-        overlay.remove();
-        onClose();
-    });
+    let closed = false;
+    const close = () => { if (!closed) { closed = true; overlay.remove(); onClose(); } };
+    closeBtn.addEventListener('click', close);
     overlay.appendChild(closeBtn);
 
-    setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 5000);
+    setTimeout(close, 5000);
     document.getElementById('centerZone').appendChild(overlay);
 }
 
@@ -1203,15 +1097,13 @@ function showSwapNotification(swap, players) {
     el.id = 'swap-notification';
     el.className = 'swap-notification';
 
-    let msg = '';
     const isMe = swap.actorId === myId;
     const actorLabel = isMe ? 'You' : swap.actorName;
+    let msg = '';
 
     if (swap.type === 'self') {
-        // swap card
-        msg = `${actorLabel} swapped slot ${swap.actorSlot + 1} `;
+        msg = `${actorLabel} swapped slot ${swap.actorSlot + 1}`;
     } else {
-        // two player swap
         const targetIsMe = swap.targetId === myId;
         const targetLabel = targetIsMe ? 'you' : swap.targetName;
         msg = `${actorLabel} swapped their slot ${swap.actorSlot + 1} with ${targetLabel}'s slot ${swap.targetSlot + 1}`;
@@ -1219,11 +1111,10 @@ function showSwapNotification(swap, players) {
 
     el.innerHTML = `<span class="sn-icon">⇄</span> ${msg}`;
     document.getElementById('centerZone').appendChild(el);
-
     setTimeout(() => { if (el.parentNode) el.remove(); }, 3500);
 }
 
-// game done
+// game over
 function showGameOver(game) {
     const players = game.players || {};
     const overlay = document.createElement('div');
@@ -1232,18 +1123,19 @@ function showGameOver(game) {
 
     const scores = Object.values(players).map(p => {
         const hand = p.hand || {};
-        const total = Object.keys(hand).filter(k => hand[k]).reduce((sum, k) => sum + cardValue(hand[k]), 0);
+        const total = Object.keys(hand).filter(k => hand[k])
+            .reduce((sum, k) => sum + cardValue(hand[k]), 0);
         return { name: p.name, id: p.id, total };
     }).sort((a, b) => a.total - b.total);
 
     const winner = scores[0];
 
-    let scoreRows = scores.map((s, i) => {
+    const scoreRows = scores.map((s, i) => {
         const tag = i === 0 ? ' <i class="fa fa-trophy"></i>' : '';
         const isCaller = s.id === game.comboCallerId ? ' (called combo)' : '';
         const isYou = s.id === myId ? ' <em>(you)</em>' : '';
         return `<tr class="${i === 0 ? 'winner-row' : ''}">
-            <td>${i+1}</td>
+            <td>${i + 1}</td>
             <td>${s.name}${isYou}${isCaller}</td>
             <td>${s.total} pts${tag}</td>
         </tr>`;
@@ -1252,7 +1144,7 @@ function showGameOver(game) {
     overlay.innerHTML = `
         <div class="gameover-card">
             <div class="gameover-title">Game Over!</div>
-            <div class="gameover-winner">${winner.name} wins with ${winner.total} points!!</div>
+            <div class="gameover-winner">${winner.name} wins with ${winner.total} points!</div>
             <table class="score-table">
                 <thead><tr><th>#</th><th>Player</th><th>Score</th></tr></thead>
                 <tbody>${scoreRows}</tbody>
@@ -1274,12 +1166,13 @@ function renderAllHandsHTML(players) {
             const color = isRed(c) ? 'red' : 'black';
             return `<span class="hand-card-chip ${color}">${c.rank}${c.suit}</span>`;
         }).join('');
-        const total = Object.keys(hand).filter(k => hand[k]).reduce((sum, k) => sum + cardValue(hand[k]), 0);
+        const total = Object.keys(hand).filter(k => hand[k])
+            .reduce((sum, k) => sum + cardValue(hand[k]), 0);
         return `<div class="reveal-player"><strong>${p.name}</strong>: ${cards} = <strong>${total} pts</strong></div>`;
     }).join('');
 }
 
-// leave game
+// leave
 async function leavegame() {
     if (!gameRef || !currentGameId) return;
 
@@ -1313,4 +1206,13 @@ function showError(msg) {
     const el = document.getElementById('error');
     el.textContent = msg;
     setTimeout(() => el.textContent = '', 3500);
+}
+
+function appendBack(area, onBack) {
+    const btn = document.createElement('button');
+    btn.className = 'btn-discard-queen';
+    btn.textContent = '← Back';
+    btn.style.marginBottom = '4px';
+    btn.addEventListener('click', onBack);
+    area.appendChild(btn);
 }

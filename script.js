@@ -485,10 +485,10 @@ function renderHand(hand, peekedSlots, status, game) {
 
             // Snap: if this card's rank matches the pile top, and we know it (peeked), highlight it
             // Players can always attempt snap even face-down, but we highlight known matches
-            if (status === 'playing' && snapRank && isPeeked && card.rank === snapRank) {
-                slot.classList.add('snap-eligible');
-                slot.title = `Snap! Your ${card.rank} matches the pile`;
-            }
+            // if (status === 'playing' && snapRank && isPeeked && card.rank === snapRank) {
+            //     slot.classList.add('snap-eligible');
+            //     slot.title = `Snap! Your ${card.rank} matches the pile`;
+            // }
 
         // Clicking a hand card during active game = attempt snap (works on or off turn)
             if (status === 'playing') {
@@ -1087,7 +1087,7 @@ function showSpecialCardChoice(drawnCard, myHand, container, game, mode) {
 
         const useBtn = document.createElement('button');
         useBtn.className = 'jack-slot-btn special-choice-btn';
-        useBtn.textContent = mode === 'own' ? '👁 Peek at your card' : '🔍 Peek at opponent\'s card';
+        useBtn.textContent = mode === 'own' ? 'Peek at your card' : 'Peek at opponent\'s card';
         useBtn.addEventListener('click', () => {
             area.innerHTML = '';
             if (mode === 'own') {
@@ -1099,7 +1099,7 @@ function showSpecialCardChoice(drawnCard, myHand, container, game, mode) {
 
         const swapBtn = document.createElement('button');
         swapBtn.className = 'jack-slot-btn special-choice-btn';
-        swapBtn.textContent = '⇄ Swap with hand';
+        swapBtn.textContent = 'Swap with hand';
         swapBtn.addEventListener('click', () => {
             area.remove();
             highlightHandForSwap(drawnCard, myHand, container, false, game);
@@ -1139,7 +1139,7 @@ function showPeekOwnThenDiscard(drawnCard, myHand, area, container, game) {
     });
 
     if (slots.length === 0) {
-        label.textContent = 'No face-down cards to peek at.';
+        label.textContent = 'No face-down cards to peek at';
     }
 
     area.appendChild(row);
@@ -1235,12 +1235,12 @@ function showSwapNotification(swap, players) {
     const actorLabel = isMe ? 'You' : swap.actorName;
 
     if (swap.type === 'self') {
-        // Drew a card and swapped into own hand
+        // // Drew a card and swapped into own hand
         const discarded = swap.discardedCard;
         const drawn = swap.drawnCard;
-        msg = `${actorLabel} swapped slot ${swap.actorSlot + 1} `
-            + `<span class="sn-card ${isRed(discarded) ? 'red' : ''}">${discarded.rank}${discarded.suit}</span> `
-            + `→ <span class="sn-card ${isRed(drawn) ? 'red' : ''}">${drawn.rank}${drawn.suit}</span>`;
+        msg = `${actorLabel} swapped slot ${swap.actorSlot + 1} `;
+            // + `<span class="sn-card ${isRed(discarded) ? 'red' : ''}">${discarded.rank}${discarded.suit}</span> `
+            // + `→ <span class="sn-card ${isRed(drawn) ? 'red' : ''}">${drawn.rank}${drawn.suit}</span>`;
     } else {
         // Jack or Queen: two-player swap
         const targetIsMe = swap.targetId === myId;
@@ -1271,7 +1271,7 @@ function showGameOver(game) {
     const winner = scores[0];
 
     let scoreRows = scores.map((s, i) => {
-        const tag = i === 0 ? ' 🏆' : '';
+        const tag = i === 0 ? ' <i class="fa fa-trophy"></i>' : '';
         const isCaller = s.id === game.comboCallerId ? ' (called combo)' : '';
         const isYou = s.id === myId ? ' <em>(you)</em>' : '';
         return `<tr class="${i === 0 ? 'winner-row' : ''}">
@@ -1283,8 +1283,8 @@ function showGameOver(game) {
 
     overlay.innerHTML = `
         <div class="gameover-card">
-            <div class="gameover-title">🏆 Game Over!</div>
-            <div class="gameover-winner">${winner.name} wins with ${winner.total} points!</div>
+            <div class="gameover-title">Game Over!</div>
+            <div class="gameover-winner">${winner.name} wins with ${winner.total} points!!</div>
             <table class="score-table">
                 <thead><tr><th>#</th><th>Player</th><th>Score</th></tr></thead>
                 <tbody>${scoreRows}</tbody>

@@ -13,7 +13,7 @@ try {
     firebase.initializeApp(firebaseConfig);
     db = firebase.database();
 } catch (e) {
-    console.error('Firebase init error:', e);
+    console.error('firebase init error:', e);
 }
 
 // vars

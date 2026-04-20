@@ -16,7 +16,7 @@ try {
     console.error('Firebase init error:', e);
 }
 
-// ── State ────────────────────────────────────────────────────────────────────
+// vars
 let myName = '';
 let myId = '';
 let currentGameId = '';
@@ -45,7 +45,7 @@ function genId() {
     return 'p_' + Math.random().toString(36).substr(2, 9);
 }
 
-// ── Deck ─────────────────────────────────────────────────────────────────────
+// build the deck
 function buildDeck() {
     const deck = [];
     for (const suit of SUITS)
@@ -75,7 +75,6 @@ function shuffle(arr) {
 
 function isRed(c) { return c.suit === '♥' || c.suit === '♦'; }
 
-// ── DOM Ready ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     myId = genId();
 
@@ -103,7 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadgames();
 });
 
-// ── Presence ──────────────────────────────────────────────────────────────────
+// i hate this
 async function registerPresence() {
     if (!db || !currentGameId) return;
 
@@ -113,17 +112,14 @@ async function registerPresence() {
         if (snap.val() === true) {
             presenceRef = db.ref(`card_games/${currentGameId}/players/${myId}`);
 
-            // Cancel old hooks
             try { await presenceRef.onDisconnect().cancel(); } catch(e) {}
 
-            // Set presence
             await presenceRef.set({
                 id: myId,
                 name: myName,
                 joinedAt: Date.now()
             });
 
-            // Register disconnect cleanup
             presenceRef.onDisconnect().remove();
         }
     });
@@ -139,7 +135,7 @@ async function cleanupIfEmpty() {
     } catch(e) {}
 }
 
-// ── Lobby ─────────────────────────────────────────────────────────────────────
+// lobby
 function loadgames() {
     if (!db) return;
     const list = document.getElementById('gamesList');
@@ -193,7 +189,7 @@ async function handleCreate() {
     myName = name;
     myId = genId();
 
-    // Clean up any stale waiting games this name was hosting
+    // clean up ahh games
     try {
         const allSnap = await db.ref('card_games').once('value');
         const cleanups = [];
@@ -295,7 +291,7 @@ async function enterGame(gameId, isNew) {
     }
 }
 
-// ── Start game ────────────────────────────────────────────────────────────────
+// start game
 async function startGame() {
     const snap = await gameRef.once('value');
     const game = snap.val();
@@ -331,7 +327,7 @@ async function startGame() {
     await gameRef.update(updates);
 }
 
-// ── Screens ───────────────────────────────────────────────────────────────────
+// inits
 function showGameScreen() {
     document.getElementById('lobbyScreen').classList.remove('active');
     document.getElementById('lobbyScreen').classList.add('hidden');
@@ -348,7 +344,6 @@ function showLobbyScreen() {
     lastRenderedStatus = null;
 }
 
-// ── Listener ──────────────────────────────────────────────────────────────────
 function listenToGame() {
     gameRef.on('value', snap => {
         const game = snap.val();
@@ -365,7 +360,7 @@ function listenToGame() {
     });
 }
 
-// ── Render ────────────────────────────────────────────────────────────────────
+// render
 function renderGame(game) {
     const players = game.players || {};
     playerOrder = game.playerOrder || Object.keys(players).sort((a, b) =>
@@ -396,7 +391,7 @@ function renderGame(game) {
         showGameOver(game);
     }
 
-    // Show swap notification to all players when a swap happens
+    // swap notifs
     if (game.lastSwap && game.lastSwap.ts !== lastRenderedSwapTs) {
         lastRenderedSwapTs = game.lastSwap.ts;
         showSwapNotification(game.lastSwap, game.players || {});
@@ -461,12 +456,11 @@ function renderPile(pile, game) {
 
 }
 
-// ── Render hand — with snap-eligible cards highlighted ───────────────────────
+// render hand
 function renderHand(hand, peekedSlots, status, game) {
     const container = document.getElementById('handCards');
     container.innerHTML = '';
 
-    // Find top pile card rank for snap highlighting
     const pile = game ? (game.pile || []) : [];
     const topCard = pile.length > 0 ? pile[pile.length - 1] : null;
     const snapRank = topCard ? topCard.rank : null;
@@ -482,15 +476,6 @@ function renderHand(hand, peekedSlots, status, game) {
         if (card) {
             const isPeeked = !!(peekedSlots && peekedSlots[i]);
             const el = buildCard(card, false, !isPeeked);
-
-            // Snap: if this card's rank matches the pile top, and we know it (peeked), highlight it
-            // Players can always attempt snap even face-down, but we highlight known matches
-            // if (status === 'playing' && snapRank && isPeeked && card.rank === snapRank) {
-            //     slot.classList.add('snap-eligible');
-            //     slot.title = `Snap! Your ${card.rank} matches the pile`;
-            // }
-
-        // Clicking a hand card during active game = attempt snap (works on or off turn)
             if (status === 'playing') {
                 slot.style.cursor = 'pointer';
                 slot.addEventListener('click', () => attemptSnap(i, hand, game));
@@ -503,13 +488,9 @@ function renderHand(hand, peekedSlots, status, game) {
     }
 }
 
-// ── Snap mechanic ─────────────────────────────────────────────────────────────
-// Any player can at any time click one of their hand cards to snap it onto the pile.
-// If the rank matches the current top card → success (card goes to pile, no penalty).
-// If wrong → draw a penalty card from the deck into their hand.
+// slap
 async function attemptSnap(slotIndex, localHand, localGame) {
     if (snapLocked) return;
-    // Don't snap during your own draw popup (popup is open)
     if (document.getElementById('popup-container')) return;
     if (!gameRef) return;
 
@@ -550,7 +531,6 @@ async function attemptSnap(slotIndex, localHand, localGame) {
             const penaltyCard = deck[deck.length - 1];
             const newDeck = deck.slice(0, -1);
 
-            // Add penalty card to a new slot
             const existingSlots = Object.keys(hand).map(Number);
             const newSlot = existingSlots.length > 0 ? Math.max(...existingSlots) + 1 : 0;
             const updates = {
@@ -641,7 +621,7 @@ function updateButtons(game) {
     comboBtn.textContent = game.comboCalled ? 'Combo Called!' : 'Call Combo';
 }
 
-// ── Turn helpers ──────────────────────────────────────────────────────────────
+// turn stuff
 function nextTurnIndex(game) {
     return (game.turnIndex + 1) % playerOrder.length;
 }
@@ -654,7 +634,7 @@ function clearPeekIfNeeded(game, updates) {
     }
 }
 
-// ── Draw card ─────────────────────────────────────────────────────────────────
+// draw card
 async function drawCard() {
     if (!isMyTurn) return;
     const snap = await gameRef.once('value');
@@ -677,7 +657,7 @@ async function drawCard() {
     showDrawnCard(card, hand, game);
 }
 
-// ── Show drawn card popup ─────────────────────────────────────────────────────
+// drawn card popup
 function showDrawnCard(card, hand, game) {
     document.getElementById('drawBtn').disabled = true;
     document.getElementById('comboBtn').disabled = true;
@@ -744,7 +724,7 @@ function getSpecialCardLabel(card) {
     }
 }
 
-// ── Discard drawn card ────────────────────────────────────────────────────────
+// discard func
 async function discardDrawnCard(card, game) {
     await gameRef.child('pile').transaction(current => {
         return [...(current || []), card];
@@ -766,7 +746,7 @@ async function discardDrawnCard(card, game) {
     await gameRef.update(updates);
 }
 
-// ── Highlight hand slots for swapping ────────────────────────────────────────
+// highlight swaps
 function highlightHandForSwap(drawnCard, hand, container, isBlind, game) {
     const slots = document.querySelectorAll('#handCards .card-slot');
     Object.keys(hand).filter(k => hand[k]).forEach(k => {
@@ -813,9 +793,7 @@ function highlightHandForSwap(drawnCard, hand, container, isBlind, game) {
     });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// JACK: simplified — two inline grids: pick opponent card slot, pick your slot
-// ═══════════════════════════════════════════════════════════════════════════════
+// jack funcs
 function showJackOptions(drawnCard, myHand, container, game) {
     const opponents = Object.entries(game.players || {}).filter(([pid]) => pid !== myId);
     if (opponents.length === 0) return;
@@ -854,7 +832,6 @@ function showJackOptions(drawnCard, myHand, container, game) {
         });
         area.appendChild(theirGrid);
 
-        // ── Your cards ──
         const myLabel = document.createElement('div');
         myLabel.className = 'swap-section-label';
         myLabel.textContent = '…with one of yours';
@@ -923,9 +900,7 @@ async function executeJackSwap(drawnCard, mySlot, oppChoice) {
     await gameRef.update(updates);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// QUEEN: simplified — pick opponent slot (shows card face-up), then swap or discard
-// ═══════════════════════════════════════════════════════════════════════════════
+// queen mechs (make this a little sooner)
 function showQueenOptions(drawnCard, myHand, container, game) {
     const opponents = Object.entries(game.players || {}).filter(([pid]) => pid !== myId);
     if (opponents.length === 0) return;
@@ -941,7 +916,6 @@ function showQueenOptions(drawnCard, myHand, container, game) {
         area.innerHTML = '';
 
         if (!peekedInfo) {
-            // Step 1: pick an opponent slot to reveal
             const label = document.createElement('div');
             label.className = 'swap-section-label';
             label.textContent = 'Peek at which card?';
@@ -1075,8 +1049,8 @@ async function executeQueenSwap(drawnCard, mySlot, oppPid, oppSlot) {
     await gameRef.update(updates);
 }
 
-// ── 7/8/9/10: choose to swap OR use the ability then discard ─────────────────
-// mode: 'own' = peek your own card (7/8), 'opp' = peek opponent's card (9/10)
+// 78910 mechs
+// own = peek your own card (7/8), opp = peek opponent's card (9/10)
 function showSpecialCardChoice(drawnCard, myHand, container, game, mode) {
     const area = document.createElement('div');
     area.className = 'special-choice-area';
@@ -1112,7 +1086,7 @@ function showSpecialCardChoice(drawnCard, myHand, container, game, mode) {
     showChoice();
 }
 
-// After peeking own card, discard the drawn card
+// discard after use
 function showPeekOwnThenDiscard(drawnCard, myHand, area, container, game) {
     const myPeeked = (game.players[myId] || {}).peekedSlots || {};
     const slots = Object.keys(myHand).filter(k => myHand[k] && !myPeeked[k]);
@@ -1145,7 +1119,6 @@ function showPeekOwnThenDiscard(drawnCard, myHand, area, container, game) {
     area.appendChild(row);
 }
 
-// After peeking opponent's card, discard the drawn card
 function showPeekOppThenDiscard(drawnCard, myHand, area, container, game) {
     const opponents = Object.entries(game.players || {}).filter(([pid]) => pid !== myId);
 
@@ -1176,7 +1149,7 @@ function showPeekOppThenDiscard(drawnCard, myHand, area, container, game) {
     area.appendChild(row);
 }
 
-// ── Temp peek overlay ─────────────────────────────────────────────────────────
+// peek overlay
 function showTempPeek(card, labelText, onClose) {
     const existing = document.getElementById('temp-peek');
     if (existing) existing.remove();
@@ -1203,7 +1176,7 @@ function showTempPeek(card, labelText, onClose) {
     document.getElementById('centerZone').appendChild(overlay);
 }
 
-// ── Call Combo ────────────────────────────────────────────────────────────────
+// combo
 async function comboFunc() {
     if (!isMyTurn) return;
     const snap = await gameRef.once('value');
@@ -1221,7 +1194,7 @@ async function comboFunc() {
     await gameRef.update(updates);
 }
 
-// ── Swap notification (shown to all players) ──────────────────────────────────
+// swap notifs
 function showSwapNotification(swap, players) {
     const existing = document.getElementById('swap-notification');
     if (existing) existing.remove();
@@ -1235,14 +1208,10 @@ function showSwapNotification(swap, players) {
     const actorLabel = isMe ? 'You' : swap.actorName;
 
     if (swap.type === 'self') {
-        // // Drew a card and swapped into own hand
-        const discarded = swap.discardedCard;
-        const drawn = swap.drawnCard;
+        // swap card
         msg = `${actorLabel} swapped slot ${swap.actorSlot + 1} `;
-            // + `<span class="sn-card ${isRed(discarded) ? 'red' : ''}">${discarded.rank}${discarded.suit}</span> `
-            // + `→ <span class="sn-card ${isRed(drawn) ? 'red' : ''}">${drawn.rank}${drawn.suit}</span>`;
     } else {
-        // Jack or Queen: two-player swap
+        // two player swap
         const targetIsMe = swap.targetId === myId;
         const targetLabel = targetIsMe ? 'you' : swap.targetName;
         msg = `${actorLabel} swapped their slot ${swap.actorSlot + 1} with ${targetLabel}'s slot ${swap.targetSlot + 1}`;
@@ -1251,11 +1220,10 @@ function showSwapNotification(swap, players) {
     el.innerHTML = `<span class="sn-icon">⇄</span> ${msg}`;
     document.getElementById('centerZone').appendChild(el);
 
-    // Auto-dismiss after 3.5s
     setTimeout(() => { if (el.parentNode) el.remove(); }, 3500);
 }
 
-// ── Game Over ─────────────────────────────────────────────────────────────────
+// game done
 function showGameOver(game) {
     const players = game.players || {};
     const overlay = document.createElement('div');
@@ -1311,7 +1279,7 @@ function renderAllHandsHTML(players) {
     }).join('');
 }
 
-// ── Leave game ────────────────────────────────────────────────────────────────
+// leave game
 async function leavegame() {
     if (!gameRef || !currentGameId) return;
 
@@ -1330,7 +1298,7 @@ async function leavegame() {
     isMyTurn = false;
     playerOrder = [];
     lastRenderedSwapTs = null;
-    myId = genId(); // fresh ID so next create/join starts clean
+    myId = genId();
     document.getElementById('gameId').value = '';
 
     const go = document.getElementById('gameover-overlay');
@@ -1340,7 +1308,7 @@ async function leavegame() {
     loadgames();
 }
 
-// ── Error ─────────────────────────────────────────────────────────────────────
+// error
 function showError(msg) {
     const el = document.getElementById('error');
     el.textContent = msg;

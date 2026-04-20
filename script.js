@@ -599,7 +599,7 @@ async function drawCard() {
     if (!game || game.status !== 'playing') return;
 
     const deck = game.deck || [];
-    if (deck.length === 0) { showError('The deck is empty!'); return; }
+    if (deck.length === 0) { showError('The deck is empty!'); showGameOver(); return; }
 
     const card = deck[deck.length - 1];
     const newDeck = deck.slice(0, -1);
@@ -1106,7 +1106,7 @@ function showSwapNotification(swap, players) {
     } else {
         const targetIsMe = swap.targetId === myId;
         const targetLabel = targetIsMe ? 'you' : swap.targetName;
-        msg = `${actorLabel} swapped their slot ${swap.actorSlot + 1} with ${targetLabel}'s slot ${swap.targetSlot + 1}`;
+        msg = `${actorLabel} swapped slot ${swap.actorSlot + 1} with ${targetLabel}'s slot ${swap.targetSlot + 1}`;
     }
 
     el.innerHTML = `<span class="sn-icon">⇄</span> ${msg}`;

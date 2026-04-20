@@ -31,7 +31,6 @@ body {
     font-family: 'Nunito', sans-serif;
     background: var(--tan);
     color: var(--brown);
-    min-height: 100vh;
     max-height: 100vh;
 }
 

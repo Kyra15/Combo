@@ -27,3 +27,4 @@ todo:
     - ~~fix slap thing it doesnt work!~~
         - add slap notification on all screens
     - fix frame sizing
+    - when deck is empty, automatically end game

@@ -191,7 +191,7 @@ async function handleCreate() {
     const name = getName();
     if (!name) return;
     myName = name;
-    myId = genId(); // fresh ID every time we create a game
+    myId = genId();
 
     // Clean up any stale waiting games this name was hosting
     try {
@@ -529,7 +529,7 @@ async function attemptSnap(slotIndex, localHand, localGame) {
         const topCard = pile.length > 0 ? pile[pile.length - 1] : null;
 
         if (topCard && card.rank === topCard.rank) {
-            // ✅ Correct snap — place card on pile
+            // good slap
             const newHand = { ...hand };
             delete newHand[slotIndex];
             const newPile = [...pile, card];
@@ -541,7 +541,7 @@ async function attemptSnap(slotIndex, localHand, localGame) {
             await gameRef.update(updates);
             showSnapFeedback(true, card);
         } else {
-            // ❌ Wrong snap — draw a penalty card
+            // bad slap
             const deck = game.deck || [];
             if (deck.length === 0) {
                 showSnapFeedback(false, card);
@@ -608,19 +608,19 @@ function buildCard(card, disabled, faceDown) {
 function renderTurnBadge(players, currentTurnId, game) {
     const badge = document.getElementById('turnBadge');
     if (game.status === 'waiting') {
-        badge.textContent = '⏳ Waiting for host…';
+        badge.textContent = 'Waiting for host…';
         badge.classList.remove('your-turn');
         return;
     }
     if (game.status === 'gameover') {
-        badge.textContent = '🏆 Game Over!';
+        badge.textContent = 'Game Over!';
         badge.classList.remove('your-turn');
         return;
     }
     const p = players[currentTurnId];
     if (!p) { badge.textContent = 'Waiting for players…'; badge.classList.remove('your-turn'); return; }
     if (currentTurnId === myId) {
-        badge.textContent = game.comboCalled ? '🌟 Your Turn! (Last round)' : '🌟 Your Turn!';
+        badge.textContent = game.comboCalled ? 'Your Turn! (Last round)' : 'Your Turn!';
         badge.classList.add('your-turn');
     } else {
         badge.textContent = game.comboCalled ? `${p.name}'s Turn (Last round)` : `${p.name}'s Turn`;
@@ -734,12 +734,12 @@ function showDrawnCard(card, hand, game) {
 
 function getSpecialCardLabel(card) {
     switch(card.rank) {
-        case 'J': return '⚡ Jack — Blind swap with any player';
-        case 'Q': return '👁 Queen — Peek at any card, then optionally swap';
-        case '7': return '👁 7/8 — Peek at one of your own cards';
-        case '8': return '👁 7/8 — Peek at one of your own cards';
-        case '9': return '🔍 9/10 — Peek at an opponent\'s card';
-        case '10': return '🔍 9/10 — Peek at an opponent\'s card';
+        case 'J': return 'Jack — Blind swap with any player';
+        case 'Q': return 'Queen — Peek at any card, then optionally swap';
+        case '7': return '7/8 — Peek at one of your own cards';
+        case '8': return '7/8 — Peek at one of your own cards';
+        case '9': return '9/10 — Peek at an opponent\'s card';
+        case '10': return '9/10 — Peek at an opponent\'s card';
         default: return null;
     }
 }

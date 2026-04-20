@@ -66,7 +66,7 @@ function shuffle(arr) {
 
 function isRed(c) { return c.suit === '♥' || c.suit === '♦'; }
 
-// ── DOM Ready ─────────────────────────────────────────────────────────────────
+// dom stuff
 document.addEventListener('DOMContentLoaded', () => {
     myId = genId();
 

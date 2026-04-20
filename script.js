@@ -16,7 +16,7 @@ try {
     console.error('Firebase init error:', e);
 }
 
-// init stuff
+// ── State ────────────────────────────────────────────────────────────────────
 let myName = '';
 let myId = '';
 let currentGameId = '';
@@ -24,21 +24,42 @@ let gameRef = null;
 let isMyTurn = false;
 let playerOrder = [];
 let presenceRef = null;
+let lastRenderedStatus = null;
 
 const SUITS = ['♠', '♥', '♦', '♣'];
 const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 const MAX_PLAYERS = 8;
+const CARDS_PER_HAND = 4;
+const MAX_DECKS = 2;
+
+function cardValue(card) {
+    if (!card) return 0;
+    if (card.rank === 'K') return 0;
+    if (card.rank === 'A') return 1;
+    if (card.rank === 'J' || card.rank === 'Q') return 10;
+    return parseInt(card.rank, 10);
+}
 
 function genId() {
     return 'p_' + Math.random().toString(36).substr(2, 9);
 }
 
-// building deck
+// ── Deck ─────────────────────────────────────────────────────────────────────
 function buildDeck() {
     const deck = [];
     for (const suit of SUITS)
         for (const rank of RANKS)
             deck.push({ rank, suit, id: rank + suit });
+    return shuffle(deck);
+}
+
+function buildDoubleDeck() {
+    const deck = [];
+    for (let d = 0; d < 2; d++) {
+        for (const suit of SUITS)
+            for (const rank of RANKS)
+                deck.push({ rank, suit, id: rank + suit + '_' + d });
+    }
     return shuffle(deck);
 }
 
@@ -51,10 +72,9 @@ function shuffle(arr) {
     return a;
 }
 
-function cardLabel(c) { return `${c.rank}${c.suit}`; }
 function isRed(c) { return c.suit === '♥' || c.suit === '♦'; }
 
-// on start
+// ── DOM Ready ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     myId = genId();
 
@@ -64,6 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('leaveBtn').addEventListener('click', leavegame);
     document.getElementById('drawBtn').addEventListener('click', drawCard);
     document.getElementById('comboBtn').addEventListener('click', comboFunc);
+    document.getElementById('startBtn').addEventListener('click', startGame);
 
     document.getElementById('playerName').addEventListener('keydown', e => {
         if (e.key === 'Enter') handleCreate();
@@ -72,7 +93,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') handleJoin();
     });
 
-    // buncha weird stuff
     window.addEventListener('beforeunload', () => {
         if (!currentGameId || !myId) return;
         const url = `https://combo-7d1b6-default-rtdb.firebaseio.com/card_games/${currentGameId}/players/${myId}.json`;
@@ -82,10 +102,30 @@ document.addEventListener('DOMContentLoaded', () => {
     loadgames();
 });
 
+// ── Presence ──────────────────────────────────────────────────────────────────
 async function registerPresence() {
     if (!db || !currentGameId) return;
-    presenceRef = db.ref(`card_games/${currentGameId}/players/${myId}`);
-    await presenceRef.onDisconnect().remove();
+
+    const connectedRef = db.ref('.info/connected');
+
+    connectedRef.on('value', async (snap) => {
+        if (snap.val() === true) {
+            presenceRef = db.ref(`card_games/${currentGameId}/players/${myId}`);
+
+            // Cancel old hooks
+            try { await presenceRef.onDisconnect().cancel(); } catch(e) {}
+
+            // Set presence
+            await presenceRef.set({
+                id: myId,
+                name: myName,
+                joinedAt: Date.now()
+            });
+
+            // Register disconnect cleanup
+            presenceRef.onDisconnect().remove();
+        }
+    });
 }
 
 async function cleanupIfEmpty() {
@@ -99,22 +139,23 @@ async function cleanupIfEmpty() {
     } catch(e) {}
 }
 
-// lobby
-
+// ── Lobby ─────────────────────────────────────────────────────────────────────
 function loadgames() {
     if (!db) return;
     const list = document.getElementById('gamesList');
     list.innerHTML = '<div class="no-games">Looking for open games…</div>';
 
-    db.ref('card_games').limitToLast(20).once('value').then(snap => {
+    db.ref('card_games').limitToLast(20).on('value', snap => {
         list.innerHTML = '';
         const items = [];
+
         snap.forEach(child => {
             const g = child.val();
             if (!g || !g.players) return;
+
             const count = Object.keys(g.players).length;
+
             if (count < MAX_PLAYERS && g.status === 'waiting') {
-                console.log("waiting game")
                 items.push({ key: child.key, game: g, count });
             }
         });
@@ -140,7 +181,7 @@ function loadgames() {
             });
             list.appendChild(div);
         });
-    }).catch(err => showError('Could not load games: ' + err.message));
+    });
 }
 
 function getName() {
@@ -153,6 +194,22 @@ async function handleCreate() {
     const name = getName();
     if (!name) return;
     myName = name;
+    myId = genId(); // fresh ID every time we create a game
+
+    // Clean up any stale waiting games this name was hosting
+    try {
+        const allSnap = await db.ref('card_games').once('value');
+        const cleanups = [];
+        allSnap.forEach(child => {
+            const g = child.val();
+            if (!g) return;
+            if (g.status === 'waiting' && g.host === myName) {
+                cleanups.push(db.ref('card_games/' + child.key).remove());
+            }
+        });
+        await Promise.all(cleanups);
+    } catch(e) {}
+
     await enterGame('game_' + Math.floor(1000 + Math.random() * 9000), true);
 }
 
@@ -160,7 +217,6 @@ async function handleJoin() {
     const name = getName();
     if (!name) return;
     let gameId = document.getElementById('gameId').value.trim();
-    console.log("handleJoin game id " + gameId);
     if (!gameId || gameId.toString().length != 4) { showError('Paste a game ID to join or create a new game'); return; }
     myName = name;
     gameId = "game_" + gameId;
@@ -178,34 +234,42 @@ async function enterGame(gameId, isNew) {
         const game = snap.val();
 
         if (isNew || !game) {
-            const deck = buildDeck();
             await gameRef.set({
                 host: myName,
+                hostId: myId,
                 status: 'waiting',
                 createdAt: Date.now(),
-                deck,
+                deck: [],
                 pile: [],
                 turnIndex: 0,
                 playerOrder: [myId],
+                decksUsed: 0,
+                comboCalled: false,
+                comboCallerId: null,
+                roundsAfterCombo: 0,
+                gameOver: false,
                 players: {
                     [myId]: {
                         id: myId,
                         name: myName,
                         hand: {},
                         colorIndex: 0,
-                        joinedAt: Date.now()
+                        joinedAt: Date.now(),
+                        score: 0
                     }
                 }
             });
         } else {
+            if (game.status !== 'waiting') { showError('Game already in progress'); return; }
+
             const players = game.players || {};
             const playerCount = Object.keys(players).length;
             const existing = Object.values(players).find(p => p.name === myName);
 
             if (existing) {
-                myId = existing.id;
+                myId = existing.id; // rejoin as same player in this specific game
             } else {
-                if (playerCount >= MAX_PLAYERS) { showError('game is full'); return; }
+                if (playerCount >= MAX_PLAYERS) { showError('Game is full'); return; }
             }
 
             const currentOrder = game.playerOrder || [];
@@ -215,7 +279,8 @@ async function enterGame(gameId, isNew) {
                 name: myName,
                 hand: existing ? existing.hand : {},
                 colorIndex: playerCount % MAX_PLAYERS,
-                joinedAt: Date.now()
+                joinedAt: Date.now(),
+                score: existing ? (existing.score || 0) : 0
             };
             if (!currentOrder.includes(myId)) {
                 updates['playerOrder'] = [...currentOrder, myId];
@@ -224,8 +289,6 @@ async function enterGame(gameId, isNew) {
         }
 
         await registerPresence();
-
-        dealCards();
         showGameScreen();
         listenToGame();
 
@@ -235,8 +298,43 @@ async function enterGame(gameId, isNew) {
     }
 }
 
-// actual game screen
+// ── Start game ────────────────────────────────────────────────────────────────
+async function startGame() {
+    const snap = await gameRef.once('value');
+    const game = snap.val();
+    if (!game) return;
+    if (game.hostId !== myId) { showError('Only the host can start the game'); return; }
+    if (Object.keys(game.players || {}).length < 2) { showError('Need at least 2 players to start'); return; }
 
+    const deck = buildDoubleDeck();
+    const players = game.players;
+    const order = game.playerOrder || Object.keys(players);
+    const updates = {};
+
+    let deckCopy = [...deck];
+    for (const pid of order) {
+        const hand = {};
+        for (let i = 0; i < CARDS_PER_HAND; i++) {
+            hand[i] = deckCopy.pop();
+        }
+        updates[`players/${pid}/hand`] = hand;
+        updates[`players/${pid}/peekedSlots`] = { 0: true, 1: true };
+        updates[`players/${pid}/hasActed`] = false;
+    }
+
+    updates['deck'] = deckCopy;
+    updates['pile'] = [];
+    updates['turnIndex'] = 0;
+    updates['status'] = 'playing';
+    updates['comboCalled'] = false;
+    updates['comboCallerId'] = null;
+    updates['roundsAfterCombo'] = 0;
+    updates['gameOver'] = false;
+
+    await gameRef.update(updates);
+}
+
+// ── Screens ───────────────────────────────────────────────────────────────────
 function showGameScreen() {
     document.getElementById('lobbyScreen').classList.remove('active');
     document.getElementById('lobbyScreen').classList.add('hidden');
@@ -250,12 +348,13 @@ function showLobbyScreen() {
     document.getElementById('gameScreen').classList.add('hidden');
     document.getElementById('lobbyScreen').classList.remove('hidden');
     document.getElementById('lobbyScreen').classList.add('active');
+    lastRenderedStatus = null;
 }
 
+// ── Listener ──────────────────────────────────────────────────────────────────
 function listenToGame() {
     gameRef.on('value', snap => {
         const game = snap.val();
-        // delete game if all players leave
         if (!game) {
             gameRef.off();
             gameRef = null;
@@ -269,6 +368,7 @@ function listenToGame() {
     });
 }
 
+// ── Render ────────────────────────────────────────────────────────────────────
 function renderGame(game) {
     const players = game.players || {};
     playerOrder = game.playerOrder || Object.keys(players).sort((a, b) =>
@@ -279,16 +379,36 @@ function renderGame(game) {
     isMyTurn = currentTurnId === myId;
 
     const me = players[myId];
-    const myHand = me ? (me.hand || []) : [];
 
-    renderPlayers(players, currentTurnId);
-    renderPile(game.pile || []);
-    renderHand(myHand);
-    renderTurnBadge(players, currentTurnId);
+    renderPlayers(players, currentTurnId, game);
+    renderPile(game.pile || [], game);
+
+    if (game.status === 'waiting') {
+        renderWaitingHand();
+    } else {
+        renderHand(me ? (me.hand || {}) : {}, me ? (me.peekedSlots || {}) : {}, game.status, game);
+    }
+
+    renderTurnBadge(players, currentTurnId, game);
     updateButtons(game);
+
+    const startBtn = document.getElementById('startBtn');
+    startBtn.style.display = (game.status === 'waiting' && game.hostId === myId) ? 'block' : 'none';
+
+    if (game.status === 'gameover' && lastRenderedStatus !== 'gameover') {
+        showGameOver(game);
+    }
+
+    lastRenderedStatus = game.status;
 }
 
-function renderPlayers(players, currentTurnId) {
+function renderWaitingHand() {
+    const container = document.getElementById('handCards');
+    container.innerHTML = '';
+    container.innerHTML = '<div class="waiting-message">Waiting for host to start the game…</div>';
+}
+
+function renderPlayers(players, currentTurnId, game) {
     const ring = document.getElementById('playersRing');
     ring.innerHTML = '';
     Object.values(players)
@@ -298,11 +418,15 @@ function renderPlayers(players, currentTurnId) {
             chip.className = 'player-chip'
                 + (p.id === currentTurnId ? ' active-turn' : '')
                 + (p.id === myId ? ' is-me' : '');
+
             const count = Object.keys(p.hand || {}).filter(k => p.hand[k]).length;
+            const comboTag = (game.comboCalled && game.comboCallerId === p.id)
+                ? '<span class="combo-tag">COMBO!</span>' : '';
+
             chip.innerHTML = `
                 <div class="player-avatar color-${p.colorIndex || 0}">${p.name[0].toUpperCase()}</div>
                 <div>
-                    <div class="player-name">${p.name}${p.id === myId ? ' (You)' : ''}</div>
+                    <div class="player-name">${p.name}${p.id === myId ? ' (You)' : ''} ${comboTag}</div>
                     <div class="player-cards-count">${count} card${count !== 1 ? 's' : ''}</div>
                 </div>
             `;
@@ -310,7 +434,7 @@ function renderPlayers(players, currentTurnId) {
         });
 }
 
-function renderPile(pile) {
+function renderPile(pile, game) {
     const stack = document.getElementById('pileStack');
     stack.innerHTML = '';
 
@@ -331,15 +455,21 @@ function renderPile(pile) {
         stack.appendChild(el);
     });
 
+
 }
 
-function renderHand(hand) {
-    console.log('renderHand:', hand);
+// ── Render hand — with snap-eligible cards highlighted ───────────────────────
+function renderHand(hand, peekedSlots, status, game) {
     const container = document.getElementById('handCards');
     container.innerHTML = '';
 
-    const filledKeys = Object.keys(hand).filter(k => hand[k]).map(Number);
-    const numSlots = Math.max(...filledKeys) < 4 ? 4 : Math.max(...filledKeys) + 1;
+    // Find top pile card rank for snap highlighting
+    const pile = game ? (game.pile || []) : [];
+    const topCard = pile.length > 0 ? pile[pile.length - 1] : null;
+    const snapRank = topCard ? topCard.rank : null;
+
+    const allKeys = Object.keys(hand).map(Number);
+    const numSlots = allKeys.length === 0 ? CARDS_PER_HAND : Math.max(...allKeys) + 1;
 
     for (let i = 0; i < numSlots; i++) {
         const slot = document.createElement('div');
@@ -347,8 +477,22 @@ function renderHand(hand) {
 
         const card = hand[i] || null;
         if (card) {
-            const el = buildCard(card, false, true);
-            el.addEventListener('click', () => { if (isMyTurn) playCard(i); });
+            const isPeeked = !!(peekedSlots && peekedSlots[i]);
+            const el = buildCard(card, false, !isPeeked);
+
+            // Snap: if this card's rank matches the pile top, and we know it (peeked), highlight it
+            // Players can always attempt snap even face-down, but we highlight known matches
+            if (status === 'playing' && snapRank && isPeeked && card.rank === snapRank) {
+                slot.classList.add('snap-eligible');
+                slot.title = `Snap! Your ${card.rank} matches the pile`;
+            }
+
+        // Clicking a hand card during active game = attempt snap (works on or off turn)
+            if (status === 'playing') {
+                slot.style.cursor = 'pointer';
+                slot.addEventListener('click', () => attemptSnap(i, hand, game));
+            }
+
             slot.appendChild(el);
         }
 
@@ -356,12 +500,88 @@ function renderHand(hand) {
     }
 }
 
+// ── Snap mechanic ─────────────────────────────────────────────────────────────
+// Any player can at any time click one of their hand cards to snap it onto the pile.
+// If the rank matches the current top card → success (card goes to pile, no penalty).
+// If wrong → draw a penalty card from the deck into their hand.
+async function attemptSnap(slotIndex, localHand, localGame) {
+    if (snapLocked) return;
+    // Don't snap during your own draw popup (popup is open)
+    if (document.getElementById('popup-container')) return;
+    if (!gameRef) return;
+
+    snapLocked = true;
+    try {
+        const snap = await gameRef.once('value');
+        const game = snap.val();
+        if (!game || game.status !== 'playing') return;
+
+        const me = (game.players || {})[myId];
+        if (!me) return;
+        const hand = me.hand || {};
+        const card = hand[slotIndex];
+        if (!card) return;
+
+        const pile = game.pile || [];
+        const topCard = pile.length > 0 ? pile[pile.length - 1] : null;
+
+        if (topCard && card.rank === topCard.rank) {
+            // ✅ Correct snap — place card on pile
+            const newHand = { ...hand };
+            delete newHand[slotIndex];
+            const newPile = [...pile, card];
+
+            const updates = {
+                [`players/${myId}/hand`]: newHand,
+                pile: newPile
+            };
+            await gameRef.update(updates);
+            showSnapFeedback(true, card);
+        } else {
+            // ❌ Wrong snap — draw a penalty card
+            const deck = game.deck || [];
+            if (deck.length === 0) {
+                showSnapFeedback(false, card);
+                return;
+            }
+            const penaltyCard = deck[deck.length - 1];
+            const newDeck = deck.slice(0, -1);
+
+            // Add penalty card to a new slot
+            const existingSlots = Object.keys(hand).map(Number);
+            const newSlot = existingSlots.length > 0 ? Math.max(...existingSlots) + 1 : 0;
+            const updates = {
+                [`players/${myId}/hand/${newSlot}`]: penaltyCard,
+                deck: newDeck
+            };
+            await gameRef.update(updates);
+            showSnapFeedback(false, card);
+        }
+    } finally {
+        snapLocked = false;
+    }
+}
+
+function showSnapFeedback(success, card) {
+    const existing = document.getElementById('snap-feedback');
+    if (existing) existing.remove();
+
+    const el = document.createElement('div');
+    el.id = 'snap-feedback';
+    el.className = 'snap-feedback ' + (success ? 'snap-success' : 'snap-fail');
+    el.textContent = success
+        ? `✓ Snapped ${card.rank}!`
+        : `✗ Wrong! Penalty card drawn`;
+
+    document.getElementById('centerZone').appendChild(el);
+    setTimeout(() => el.remove(), 2000);
+}
+
 function buildCard(card, disabled, faceDown) {
     const el = document.createElement('div');
     el.className = 'playing-card' + (disabled ? ' disabled' : '') + (faceDown ? ' face-down' : '');
     el.dataset.rank = card.rank;
     el.dataset.suit = card.suit;
-    el.dataset.isRed = isRed(card);
 
     const c = isRed(card) ? 'red' : 'black';
 
@@ -382,15 +602,25 @@ function buildCard(card, disabled, faceDown) {
     return el;
 }
 
-function renderTurnBadge(players, currentTurnId) {
+function renderTurnBadge(players, currentTurnId, game) {
     const badge = document.getElementById('turnBadge');
+    if (game.status === 'waiting') {
+        badge.textContent = '⏳ Waiting for host…';
+        badge.classList.remove('your-turn');
+        return;
+    }
+    if (game.status === 'gameover') {
+        badge.textContent = '🏆 Game Over!';
+        badge.classList.remove('your-turn');
+        return;
+    }
     const p = players[currentTurnId];
     if (!p) { badge.textContent = 'Waiting for players…'; badge.classList.remove('your-turn'); return; }
     if (currentTurnId === myId) {
-        badge.textContent = '🌟 Your Turn!';
+        badge.textContent = game.comboCalled ? '🌟 Your Turn! (Last round)' : '🌟 Your Turn!';
         badge.classList.add('your-turn');
     } else {
-        badge.textContent = `${p.name}'s Turn`;
+        badge.textContent = game.comboCalled ? `${p.name}'s Turn (Last round)` : `${p.name}'s Turn`;
         badge.classList.remove('your-turn');
     }
 }
@@ -399,198 +629,651 @@ function updateButtons(game) {
     const deck = game.deck || [];
     const drawBtn = document.getElementById('drawBtn');
     const comboBtn = document.getElementById('comboBtn');
-    drawBtn.disabled = !isMyTurn || deck.length === 0;
-    comboBtn.disabled = !isMyTurn;
-    // drawBtn.textContent = deck.length > 0 ? `Draw Card (${deck.length} left)` : 'Deck Empty';
+    const playing = game.status === 'playing';
+
+    drawBtn.disabled = !playing || !isMyTurn || deck.length === 0;
+    comboBtn.disabled = !playing || !isMyTurn || !!game.comboCalled;
+
+    drawBtn.textContent = (deck.length === 0 && playing) ? 'Deck Empty' : 'Draw Card';
+    comboBtn.textContent = game.comboCalled ? 'Combo Called!' : 'Call Combo';
 }
 
-// actions
-
-async function dealCards() {
-    // draw 4 random cards per player
-    // update database 
-    const snap = await gameRef.once('value');
-    const game = snap.val();
-    if (!game) return;
-
-    let deck = [...game.deck];
-    const players = game.players;
-    let updates = {};
-
-    for (const playerID in players) {
-        const existingHand = players[playerID].hand || {};
-        if (Object.keys(existingHand).length > 0) continue;
-        const hand = {};
-        for (let i=0; i < 4; i++) {
-            hand[i] = deck.pop()
-        }
-        updates[`players/${playerID}/hand`] = hand;
-    }
-    updates['deck'] = deck;
-
-    await gameRef.update(updates)
+// ── Turn helpers ──────────────────────────────────────────────────────────────
+function nextTurnIndex(game) {
+    return (game.turnIndex + 1) % playerOrder.length;
 }
 
-
-async function playCard(idx) {
-    if (!isMyTurn) return;
-    const snap = await gameRef.once('value');
-    const game = snap.val();
-    if (!game) return;
+function clearPeekIfNeeded(game, updates) {
     const me = (game.players || {})[myId];
-    if (!me) return;
-    const hand = me.hand || {};
-
-    const card = hand[idx];
-    if (!card) return; // slot is empty
-
-    const pile = [...(game.pile || []), card];
-    const next = (game.turnIndex + 1) % playerOrder.length;
-
-    await gameRef.update({
-        [`players/${myId}/hand/${idx}`]: null, // null = remove slot
-        pile,
-        turnIndex: next
-    });
+    if (me && !me.hasActed) {
+        updates[`players/${myId}/peekedSlots`] = null;
+        updates[`players/${myId}/hasActed`] = true;
+    }
 }
 
+// ── Draw card ─────────────────────────────────────────────────────────────────
 async function drawCard() {
     if (!isMyTurn) return;
     const snap = await gameRef.once('value');
     const game = snap.val();
-    if (!game) return;
+    if (!game || game.status !== 'playing') return;
+
     const deck = game.deck || [];
     if (deck.length === 0) { showError('The deck is empty!'); return; }
 
-    const me = (game.players || {})[myId];
-    const hand = me.hand || {};
     const card = deck[deck.length - 1];
     const newDeck = deck.slice(0, -1);
 
-    await gameRef.update({ deck: newDeck });
+    const deckUpdate = { deck: newDeck };
+    clearPeekIfNeeded(game, deckUpdate);
+    await gameRef.update(deckUpdate);
 
-    showDrawnCard(card, hand);
+    const me = (game.players || {})[myId];
+    const hand = me ? (me.hand || {}) : {};
+
+    showDrawnCard(card, hand, game);
 }
 
-function showDrawnCard(card, hand) {
-
+// ── Show drawn card popup ─────────────────────────────────────────────────────
+function showDrawnCard(card, hand, game) {
     document.getElementById('drawBtn').disabled = true;
     document.getElementById('comboBtn').disabled = true;
 
     const centerZone = document.getElementById('centerZone');
+
+    const existing = document.getElementById('popup-container');
+    if (existing) existing.remove();
+
     const container = document.createElement('div');
     container.classList.add('popup-container');
     container.id = 'popup-container';
 
+    const specialLabel = getSpecialCardLabel(card);
+    if (specialLabel) {
+        const label = document.createElement('div');
+        label.className = 'special-card-label';
+        label.textContent = specialLabel;
+        container.appendChild(label);
+    }
+
     const popupCard = buildCard(card, false, false);
     popupCard.classList.add('popup-card');
+    container.appendChild(popupCard);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'popup-btn-row';
 
     const discardBtn = document.createElement('button');
-    discardBtn.classList.add('btn-discard');
-    discardBtn.classList.add('btn-primary');
-
-    discardBtn.innerHTML = 'Discard <span style="margin-left: 8px;"><i class="fa fa-trash"></i></span>';
+    discardBtn.classList.add('btn-discard', 'btn-primary');
+    discardBtn.innerHTML = 'Discard <span style="margin-left:8px;"><i class="fa fa-trash"></i></span>';
     discardBtn.addEventListener('click', async () => {
         container.remove();
-        document.getElementById('drawBtn').disabled = false;
-        document.getElementById('comboBtn').disabled = false;
-        
-        // i can't believe this worked but this needs to be a transaction otherwise i double count cards in the pile
-        await gameRef.child('pile').transaction(current => {
-            const arr = current || [];
-            return [...arr, card];
-        });
+        await discardDrawnCard(card, game);
     });
 
-    container.appendChild(popupCard);
-    container.appendChild(discardBtn);
+    btnRow.appendChild(discardBtn);
+    container.appendChild(btnRow);
     centerZone.appendChild(container);
 
-    highlightHandForSwap(card, hand, container);
+    const rank = card.rank;
+    if (rank === 'J') {
+        showJackOptions(card, hand, container, game);
+    } else if (rank === 'Q') {
+        showQueenOptions(card, hand, container, game);
+    } else if (rank === '7' || rank === '8') {
+        showSpecialCardChoice(card, hand, container, game, 'own');
+    } else if (rank === '9' || rank === '10') {
+        showSpecialCardChoice(card, hand, container, game, 'opp');
+    } else {
+        highlightHandForSwap(card, hand, container, false, game);
+    }
 }
 
-function highlightHandForSwap(drawnCard, hand, container) {
+function getSpecialCardLabel(card) {
+    switch(card.rank) {
+        case 'J': return '⚡ Jack — Blind swap with any player';
+        case 'Q': return '👁 Queen — Peek at any card, then optionally swap';
+        case '7': return '👁 7/8 — Peek at one of your own cards';
+        case '8': return '👁 7/8 — Peek at one of your own cards';
+        case '9': return '🔍 9/10 — Peek at an opponent\'s card';
+        case '10': return '🔍 9/10 — Peek at an opponent\'s card';
+        default: return null;
+    }
+}
+
+// ── Discard drawn card ────────────────────────────────────────────────────────
+async function discardDrawnCard(card, game) {
+    await gameRef.child('pile').transaction(current => {
+        return [...(current || []), card];
+    });
+
+    const snap = await gameRef.once('value');
+    const g = snap.val();
+    const next = nextTurnIndex(g);
+    const updates = { turnIndex: next };
+
+    if (g.comboCalled) {
+        const newRounds = (g.roundsAfterCombo || 0) + 1;
+        updates['roundsAfterCombo'] = newRounds;
+        if (newRounds >= playerOrder.length - 1) {
+            updates['status'] = 'gameover';
+        }
+    }
+
+    await gameRef.update(updates);
+}
+
+// ── Highlight hand slots for swapping ────────────────────────────────────────
+function highlightHandForSwap(drawnCard, hand, container, isBlind, game) {
     const slots = document.querySelectorAll('#handCards .card-slot');
     Object.keys(hand).filter(k => hand[k]).forEach(k => {
-        // this is so weird but timing is off so i have to capture the card out here first
         const originalCard = hand[k];
         const slot = slots[Number(k)];
         if (!slot) return;
         slot.classList.add('swap-target');
         slot.addEventListener('click', async function onSwap() {
+            slot.classList.remove('swap-target');
             container.remove();
-            document.getElementById('drawBtn').disabled = false;
-            document.getElementById('comboBtn').disabled = false;
 
             const snap = await gameRef.once('value');
-            const game = snap.val();
-            const oldCard = originalCard;
+            const g = snap.val();
+            const currentPile = g.pile || [];
+            const pile = [...currentPile, originalCard];
+            const next = nextTurnIndex(g);
 
-            // console.log("hand " + game.players[myId].hand);
-            // console.log("k " + k);
-            // console.log("old card " + oldCard);
-
-            // console.log("pile???" + game.pile);
-            const currentPile = game.pile || [];
-            // console.log("current pile "+ currentPile);
-            // console.log("pile before:", currentPile.length);
-            const pile = [...currentPile, oldCard];
-            const next = (game.turnIndex + 1) % playerOrder.length;
-
-            await gameRef.update({
+            const updates = {
                 [`players/${myId}/hand/${k}`]: drawnCard,
+                pile,
                 turnIndex: next
-            });
+            };
+
+            if (g.comboCalled) {
+                const newRounds = (g.roundsAfterCombo || 0) + 1;
+                updates['roundsAfterCombo'] = newRounds;
+                if (newRounds >= playerOrder.length - 1) {
+                    updates['status'] = 'gameover';
+                }
+            }
+
+            await gameRef.update(updates);
+            document.querySelectorAll('#handCards .card-slot.swap-target').forEach(s => s.classList.remove('swap-target'));
         }, { once: true });
     });
 }
 
-async function comboFunc() {
-    // if (!isMyTurn) return;
-    // const snap = await gameRef.once('value');
-    // const game = snap.val();
-    // if (!game) return;
-    // const me = (game.players || {})[myId];
-    // const next = (game.turnIndex + 1) % playerOrder.length;
-    // const log = [...(game.log || []),
-    //     `<span class="log-name">${me ? me.name : 'Someone'}</span> passed`];
-    // await gameRef.update({ turnIndex: next, log });
-    console.log("combo!")
+// ═══════════════════════════════════════════════════════════════════════════════
+// JACK: simplified — two inline grids: pick opponent card slot, pick your slot
+// ═══════════════════════════════════════════════════════════════════════════════
+function showJackOptions(drawnCard, myHand, container, game) {
+    const opponents = Object.entries(game.players || {}).filter(([pid]) => pid !== myId);
+    if (opponents.length === 0) return;
+
+    const area = document.createElement('div');
+    area.className = 'swap-picker';
+    container.appendChild(area);
+
+    let selectedOpp = null;  // { pid, slot }
+    let selectedMine = null; // slot index
+
+    function render() {
+        area.innerHTML = '';
+
+        // ── Their cards ──
+        const theirLabel = document.createElement('div');
+        theirLabel.className = 'swap-section-label';
+        theirLabel.textContent = 'Swap one of their cards…';
+        area.appendChild(theirLabel);
+
+        const theirGrid = document.createElement('div');
+        theirGrid.className = 'swap-grid';
+
+        opponents.forEach(([pid, p]) => {
+            const oppHand = p.hand || {};
+            Object.keys(oppHand).filter(k => oppHand[k]).forEach(k => {
+                const btn = document.createElement('div');
+                btn.className = 'swap-chip' + (selectedOpp && selectedOpp.pid === pid && selectedOpp.slot == k ? ' selected' : '');
+                btn.innerHTML = `<span class="swap-chip-player">${p.name}</span><span class="swap-chip-slot">Slot ${parseInt(k)+1}</span>`;
+                btn.addEventListener('click', () => {
+                    selectedOpp = { pid, slot: parseInt(k) };
+                    render();
+                });
+                theirGrid.appendChild(btn);
+            });
+        });
+        area.appendChild(theirGrid);
+
+        // ── Your cards ──
+        const myLabel = document.createElement('div');
+        myLabel.className = 'swap-section-label';
+        myLabel.textContent = '…with one of yours';
+        area.appendChild(myLabel);
+
+        const myGrid = document.createElement('div');
+        myGrid.className = 'swap-grid';
+
+        Object.keys(myHand).filter(k => myHand[k]).forEach(k => {
+            const btn = document.createElement('div');
+            btn.className = 'swap-chip mine' + (selectedMine == k ? ' selected' : '');
+            btn.innerHTML = `<span class="swap-chip-player">You</span><span class="swap-chip-slot">Slot ${parseInt(k)+1}</span>`;
+            btn.addEventListener('click', () => {
+                selectedMine = k;
+                render();
+            });
+            myGrid.appendChild(btn);
+        });
+        area.appendChild(myGrid);
+
+        // ── Confirm ──
+        if (selectedOpp !== null && selectedMine !== null) {
+            const confirmBtn = document.createElement('button');
+            confirmBtn.className = 'btn-confirm-swap';
+            confirmBtn.textContent = '⇄ Swap';
+            confirmBtn.addEventListener('click', async () => {
+                container.remove();
+                await executeJackSwap(drawnCard, parseInt(selectedMine), selectedOpp);
+            });
+            area.appendChild(confirmBtn);
+        }
+    }
+
+    render();
 }
 
+async function executeJackSwap(drawnCard, mySlot, oppChoice) {
+    const snap = await gameRef.once('value');
+    const g = snap.val();
+    const myCard = g.players[myId].hand[mySlot];
+    const oppCard = g.players[oppChoice.pid].hand[oppChoice.slot];
+    const pile = [...(g.pile || []), drawnCard];
+    const next = nextTurnIndex(g);
 
-// ── Leave game (button) ────────────────────────────
+    const updates = {
+        [`players/${myId}/hand/${mySlot}`]: oppCard,
+        [`players/${oppChoice.pid}/hand/${oppChoice.slot}`]: myCard,
+        pile,
+        turnIndex: next
+    };
+    if (g.comboCalled) {
+        const r = (g.roundsAfterCombo || 0) + 1;
+        updates['roundsAfterCombo'] = r;
+        if (r >= playerOrder.length - 1) updates['status'] = 'gameover';
+    }
+    await gameRef.update(updates);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// QUEEN: simplified — pick opponent slot (shows card face-up), then swap or discard
+// ═══════════════════════════════════════════════════════════════════════════════
+function showQueenOptions(drawnCard, myHand, container, game) {
+    const opponents = Object.entries(game.players || {}).filter(([pid]) => pid !== myId);
+    if (opponents.length === 0) return;
+
+    const area = document.createElement('div');
+    area.className = 'swap-picker';
+    container.appendChild(area);
+
+    let peekedInfo = null;   // { pid, slot, card }
+    let selectedMine = null;
+
+    function render() {
+        area.innerHTML = '';
+
+        if (!peekedInfo) {
+            // Step 1: pick an opponent slot to reveal
+            const label = document.createElement('div');
+            label.className = 'swap-section-label';
+            label.textContent = 'Peek at which card?';
+            area.appendChild(label);
+
+            const grid = document.createElement('div');
+            grid.className = 'swap-grid';
+
+            opponents.forEach(([pid, p]) => {
+                const oppHand = p.hand || {};
+                Object.keys(oppHand).filter(k => oppHand[k]).forEach(k => {
+                    const btn = document.createElement('div');
+                    btn.className = 'swap-chip';
+                    btn.innerHTML = `<span class="swap-chip-player">${p.name}</span><span class="swap-chip-slot">Slot ${parseInt(k)+1}</span>`;
+                    btn.addEventListener('click', () => {
+                        peekedInfo = { pid, slot: parseInt(k), card: game.players[pid].hand[k] };
+                        render();
+                    });
+                    grid.appendChild(btn);
+                });
+            });
+            area.appendChild(grid);
+
+        } else {
+            // Step 2: show the peeked card + let them choose to swap or not
+            const peekRow = document.createElement('div');
+            peekRow.className = 'queen-peek-row';
+
+            const peekInfo = document.createElement('div');
+            const oppName = (game.players[peekedInfo.pid] || {}).name || '?';
+            peekInfo.className = 'swap-section-label';
+            peekInfo.textContent = `${oppName}'s slot ${peekedInfo.slot + 1}:`;
+            peekRow.appendChild(peekInfo);
+
+            const cardEl = buildCard(peekedInfo.card, false, false);
+            cardEl.style.width = '72px';
+            cardEl.style.height = '100px';
+            cardEl.style.cursor = 'default';
+            peekRow.appendChild(cardEl);
+            area.appendChild(peekRow);
+
+            const myLabel = document.createElement('div');
+            myLabel.className = 'swap-section-label';
+            myLabel.textContent = 'Swap with one of yours? (or discard Queen)';
+            area.appendChild(myLabel);
+
+            const myGrid = document.createElement('div');
+            myGrid.className = 'swap-grid';
+
+            Object.keys(myHand).filter(k => myHand[k]).forEach(k => {
+                const btn = document.createElement('div');
+                btn.className = 'swap-chip mine' + (selectedMine == k ? ' selected' : '');
+                btn.innerHTML = `<span class="swap-chip-player">You</span><span class="swap-chip-slot">Slot ${parseInt(k)+1}</span>`;
+                btn.addEventListener('click', () => {
+                    selectedMine = k;
+                    render();
+                });
+                myGrid.appendChild(btn);
+            });
+            area.appendChild(myGrid);
+
+            const actionRow = document.createElement('div');
+            actionRow.className = 'queen-action-row';
+
+            if (selectedMine !== null) {
+                const swapBtn = document.createElement('button');
+                swapBtn.className = 'btn-confirm-swap';
+                swapBtn.textContent = '⇄ Swap';
+                swapBtn.addEventListener('click', async () => {
+                    container.remove();
+                    await executeQueenSwap(drawnCard, parseInt(selectedMine), peekedInfo.pid, peekedInfo.slot);
+                });
+                actionRow.appendChild(swapBtn);
+            }
+
+            const discardQueenBtn = document.createElement('button');
+            discardQueenBtn.className = 'btn-discard-queen';
+            discardQueenBtn.textContent = 'Discard Queen';
+            discardQueenBtn.addEventListener('click', async () => {
+                container.remove();
+                await discardDrawnCard(drawnCard, game);
+            });
+            actionRow.appendChild(discardQueenBtn);
+
+            const backBtn = document.createElement('button');
+            backBtn.className = 'btn-discard-queen';
+            backBtn.textContent = '← Back';
+            backBtn.addEventListener('click', () => {
+                peekedInfo = null;
+                selectedMine = null;
+                render();
+            });
+            actionRow.appendChild(backBtn);
+
+            area.appendChild(actionRow);
+        }
+    }
+
+    render();
+}
+
+async function executeQueenSwap(drawnCard, mySlot, oppPid, oppSlot) {
+    const snap = await gameRef.once('value');
+    const g = snap.val();
+    const myCard = g.players[myId].hand[mySlot];
+    const oppCard = g.players[oppPid].hand[oppSlot];
+    const pile = [...(g.pile || []), drawnCard];
+    const next = nextTurnIndex(g);
+
+    const updates = {
+        [`players/${myId}/hand/${mySlot}`]: oppCard,
+        [`players/${oppPid}/hand/${oppSlot}`]: myCard,
+        pile,
+        turnIndex: next
+    };
+    if (g.comboCalled) {
+        const r = (g.roundsAfterCombo || 0) + 1;
+        updates['roundsAfterCombo'] = r;
+        if (r >= playerOrder.length - 1) updates['status'] = 'gameover';
+    }
+    await gameRef.update(updates);
+}
+
+// ── 7/8/9/10: choose to swap OR use the ability then discard ─────────────────
+// mode: 'own' = peek your own card (7/8), 'opp' = peek opponent's card (9/10)
+function showSpecialCardChoice(drawnCard, myHand, container, game, mode) {
+    const area = document.createElement('div');
+    area.className = 'special-choice-area';
+    container.appendChild(area);
+
+    function showChoice() {
+        area.innerHTML = '';
+
+        const useBtn = document.createElement('button');
+        useBtn.className = 'jack-slot-btn special-choice-btn';
+        useBtn.textContent = mode === 'own' ? '👁 Peek at your card' : '🔍 Peek at opponent\'s card';
+        useBtn.addEventListener('click', () => {
+            area.innerHTML = '';
+            if (mode === 'own') {
+                showPeekOwnThenDiscard(drawnCard, myHand, area, container, game);
+            } else {
+                showPeekOppThenDiscard(drawnCard, myHand, area, container, game);
+            }
+        });
+
+        const swapBtn = document.createElement('button');
+        swapBtn.className = 'jack-slot-btn special-choice-btn';
+        swapBtn.textContent = '⇄ Swap with hand';
+        swapBtn.addEventListener('click', () => {
+            area.remove();
+            highlightHandForSwap(drawnCard, myHand, container, false, game);
+        });
+
+        area.appendChild(useBtn);
+        area.appendChild(swapBtn);
+    }
+
+    showChoice();
+}
+
+// After peeking own card, discard the drawn card
+function showPeekOwnThenDiscard(drawnCard, myHand, area, container, game) {
+    const myPeeked = (game.players[myId] || {}).peekedSlots || {};
+    const slots = Object.keys(myHand).filter(k => myHand[k] && !myPeeked[k]);
+
+    const label = document.createElement('div');
+    label.className = 'special-action-label';
+    label.textContent = 'Pick one of your face-down cards to peek at:';
+    area.appendChild(label);
+
+    const row = document.createElement('div');
+    row.className = 'jack-row';
+
+    slots.forEach(k => {
+        const btn = document.createElement('button');
+        btn.className = 'jack-slot-btn';
+        btn.textContent = `Slot ${parseInt(k)+1}`;
+        btn.addEventListener('click', () => {
+            showTempPeek(myHand[k], `Your slot ${parseInt(k)+1}`, async () => {
+                container.remove();
+                await discardDrawnCard(drawnCard, game);
+            });
+        });
+        row.appendChild(btn);
+    });
+
+    if (slots.length === 0) {
+        label.textContent = 'No face-down cards to peek at.';
+    }
+
+    area.appendChild(row);
+}
+
+// After peeking opponent's card, discard the drawn card
+function showPeekOppThenDiscard(drawnCard, myHand, area, container, game) {
+    const opponents = Object.entries(game.players || {}).filter(([pid]) => pid !== myId);
+
+    const label = document.createElement('div');
+    label.className = 'special-action-label';
+    label.textContent = 'Pick an opponent\'s card to peek at:';
+    area.appendChild(label);
+
+    const row = document.createElement('div');
+    row.className = 'jack-row';
+
+    opponents.forEach(([pid, p]) => {
+        const oppHand = p.hand || {};
+        Object.keys(oppHand).filter(k => oppHand[k]).forEach(k => {
+            const btn = document.createElement('button');
+            btn.className = 'jack-slot-btn';
+            btn.textContent = `${p.name} #${parseInt(k)+1}`;
+            btn.addEventListener('click', () => {
+                showTempPeek(oppHand[k], `${p.name}'s slot ${parseInt(k)+1}`, async () => {
+                    container.remove();
+                    await discardDrawnCard(drawnCard, game);
+                });
+            });
+            row.appendChild(btn);
+        });
+    });
+
+    area.appendChild(row);
+}
+
+// ── Temp peek overlay ─────────────────────────────────────────────────────────
+function showTempPeek(card, labelText, onClose) {
+    const existing = document.getElementById('temp-peek');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'temp-peek';
+    overlay.className = 'peek-overlay';
+    overlay.innerHTML = `<div class="peek-label">👁 ${labelText}</div>`;
+    const cardEl = buildCard(card, false, false);
+    cardEl.style.width = '90px';
+    cardEl.style.height = '126px';
+    overlay.appendChild(cardEl);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'btn-discard btn-primary';
+    closeBtn.textContent = 'Got it';
+    closeBtn.addEventListener('click', () => {
+        overlay.remove();
+        onClose();
+    });
+    overlay.appendChild(closeBtn);
+
+    setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 5000);
+    document.getElementById('centerZone').appendChild(overlay);
+}
+
+// ── Call Combo ────────────────────────────────────────────────────────────────
+async function comboFunc() {
+    if (!isMyTurn) return;
+    const snap = await gameRef.once('value');
+    const game = snap.val();
+    if (!game || game.status !== 'playing' || game.comboCalled) return;
+
+    const next = nextTurnIndex(game);
+    const updates = {
+        comboCalled: true,
+        comboCallerId: myId,
+        roundsAfterCombo: 0,
+        turnIndex: next
+    };
+    clearPeekIfNeeded(game, updates);
+    await gameRef.update(updates);
+}
+
+// ── Game Over ─────────────────────────────────────────────────────────────────
+function showGameOver(game) {
+    const players = game.players || {};
+    const overlay = document.createElement('div');
+    overlay.id = 'gameover-overlay';
+    overlay.className = 'gameover-overlay';
+
+    const scores = Object.values(players).map(p => {
+        const hand = p.hand || {};
+        const total = Object.keys(hand).filter(k => hand[k]).reduce((sum, k) => sum + cardValue(hand[k]), 0);
+        return { name: p.name, id: p.id, total };
+    }).sort((a, b) => a.total - b.total);
+
+    const winner = scores[0];
+
+    let scoreRows = scores.map((s, i) => {
+        const tag = i === 0 ? ' 🏆' : '';
+        const isCaller = s.id === game.comboCallerId ? ' (called combo)' : '';
+        const isYou = s.id === myId ? ' <em>(you)</em>' : '';
+        return `<tr class="${i === 0 ? 'winner-row' : ''}">
+            <td>${i+1}</td>
+            <td>${s.name}${isYou}${isCaller}</td>
+            <td>${s.total} pts${tag}</td>
+        </tr>`;
+    }).join('');
+
+    overlay.innerHTML = `
+        <div class="gameover-card">
+            <div class="gameover-title">🏆 Game Over!</div>
+            <div class="gameover-winner">${winner.name} wins with ${winner.total} points!</div>
+            <table class="score-table">
+                <thead><tr><th>#</th><th>Player</th><th>Score</th></tr></thead>
+                <tbody>${scoreRows}</tbody>
+            </table>
+            <div class="gameover-hands">${renderAllHandsHTML(players)}</div>
+            <button class="btn-primary gameover-leave" id="gameoverLeaveBtn">Back to Lobby</button>
+        </div>
+    `;
+
+    document.getElementById('gameScreen').appendChild(overlay);
+    document.getElementById('gameoverLeaveBtn').addEventListener('click', leavegame);
+}
+
+function renderAllHandsHTML(players) {
+    return Object.values(players).map(p => {
+        const hand = p.hand || {};
+        const cards = Object.keys(hand).filter(k => hand[k]).map(k => {
+            const c = hand[k];
+            const color = isRed(c) ? 'red' : 'black';
+            return `<span class="hand-card-chip ${color}">${c.rank}${c.suit}</span>`;
+        }).join('');
+        const total = Object.keys(hand).filter(k => hand[k]).reduce((sum, k) => sum + cardValue(hand[k]), 0);
+        return `<div class="reveal-player"><strong>${p.name}</strong>: ${cards} = <strong>${total} pts</strong></div>`;
+    }).join('');
+}
+
+// ── Leave game ────────────────────────────────────────────────────────────────
 async function leavegame() {
     if (!gameRef || !currentGameId) return;
 
     try {
-        // Cancel the onDisconnect since we're leaving intentionally
         if (presenceRef) await presenceRef.onDisconnect().cancel();
-
-        // Stop listening first
         gameRef.off();
-
-        // Remove this player
         await db.ref(`card_games/${currentGameId}/players/${myId}`).remove();
-
-        // Delete the game if no players remain
         await cleanupIfEmpty();
     } catch(e) {
         console.error('leavegame error:', e);
     }
 
-    // Reset and go back to lobby
     gameRef = null;
     presenceRef = null;
     currentGameId = '';
     isMyTurn = false;
     playerOrder = [];
+    myId = genId(); // fresh ID so next create/join starts clean
     document.getElementById('gameId').value = '';
+
+    const go = document.getElementById('gameover-overlay');
+    if (go) go.remove();
 
     showLobbyScreen();
     loadgames();
 }
 
+// ── Error ─────────────────────────────────────────────────────────────────────
 function showError(msg) {
     const el = document.getElementById('error');
     el.textContent = msg;
